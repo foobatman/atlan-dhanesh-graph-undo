@@ -14,7 +14,7 @@ Undo for subtree deletes on a small SQLite-backed graph. The brief is in [proble
 | `apply` op handlers (`add_node`, `edit_node`, `delete_node`, `add_edge`, `delete_edge`) | done |
 | `dump` (live graph as sorted JSONL) | done |
 | `undo` | in progress (separate session) |
-| Checker | not started |
+| Checker (`uv run check`) | done: invariants 1–6 and 8 (7 skipped); its e2e tests run once `undo` is on this branch |
 
 ## Setup
 
@@ -173,6 +173,61 @@ Prints the **live** graph as JSONL on stdout, using the same compact, sorted-key
 
 **Read-only.** The db is opened with `mode=ro` and read in one transaction, so a dump issues no writes and always shows one consistent moment. If a writer such as `undo` crashed mid-transaction and left a hot journal, dump reopens the db normally so SQLite's crash recovery rolls back to the last commit, and prints that state. That's the dump invariant 7 asks for between a crashed and a resumed undo. It exits 1 with a message, and no output, if the db is missing, isn't SQLite, has pending migrations or is newer than the code.
 
+## Check
+
+```sh
+uv run check                                   # fixtures/seed.jsonl + fixtures/ops.jsonl, undoes op-0001
+uv run check --seed S --ops O --op op-0001     # any delete_node op in O
+uv run check --workdir DIR --keep --all        # keep artifacts in DIR; print every violation
+```
+
+An independent witness for undo. It runs the tool as a black box through its CLI commands, and reads only what they print: dumps, the undo report and the fixture files. **It never opens the db, and it imports nothing from `graph_undo`** (`tests/test_layers.py` enforces both). Each command runs as `uv run <cmd> … --db <workdir>/graph.db`:
+
+| step | command | artifact |
+|---|---|---|
+| 1 | `load <seed>` | |
+| 2 | `apply ops_pre.jsonl` (the lines before the target op; skipped if there are none) | |
+| 3 | `dump` | `D0.jsonl`: before the delete |
+| 4 | `apply ops_target.jsonl` (the target op only) | |
+| 5 | `dump` | `D1.jsonl`: after the delete |
+| 6 | `apply <ops>` (the full file; ops already applied are skipped) | |
+| 7 | `dump` | `D2.jsonl`: before undo |
+| 8 | `undo <op>` | `report.jsonl` |
+| 9 | `dump` | `D3.jsonl`: after undo |
+| 10 | `undo <op>` again (any exit code) | `report2.jsonl`, `undo2.stderr` |
+| 11 | `dump` | `D4.jsonl`: after the second undo |
+
+- **Removed set:** D0 − D1. Before any invariant is checked, a guard confirms that it is exactly the target's `contains` subtree plus every edge touching it, and that nothing else changed.
+- **1:** frame check. Every node and edge in D2 is unchanged in D3. Anything new is a removed item, or a `contains` edge into a restored node.
+- **2:** by name. A removed node whose name is free in D2, and whose original parent's name is held in D3 by a node of the same type (or which had no parent), must be in D3 with its id and authored fields, under that holder, and its report line must say `restored`. Zero such nodes is a failure (`vacuous`).
+- **3:** unique names in D3 and D4.
+- **4:** the report lists every removed node id and edge triple exactly once, with valid outcomes and reasons, and the outcomes agree with D3.
+- **5:** no dangling edges, at most one parent per node, no cycles, and `effective_tags` recomputed from D3/D4.
+- **6:** D3 and D4 are byte-identical.
+- **7:** skipped; not covered by this checker.
+- **8:** steps 1, 2, 4, 6, 8 and 9 (load, a full apply, undo, dump) take under 60 s.
+
+Seed 42, against the undo branch:
+
+```
+1 PASS  frame: 1949 nodes, 2104 edges unchanged; 546 nodes, 671 edges added
+2 PASS  546 eligible nodes restored intact
+3 PASS  2495 names unique
+4 PASS  614 nodes, 774 edges, each reported once
+5 PASS  2495 nodes
+6 PASS  D3 == D4
+7 SKIP  not covered by this checker
+8 PASS  scenario 0.4 s (checker total 0.9 s)
+check op-0001: 7 passed, 0 failed, 1 skipped
+```
+
+**Exit codes:**
+- 0: no `FAIL`;
+- 1: at least one invariant fails (up to 10 violations each are shown; `--all` shows all of them);
+- 2: the run, the guard or the input failed (an unknown op, a target op that isn't a `delete_node`, a command that failed at some step), with the message on stderr.
+
+The workdir is a temp dir, removed on success. It is kept, and its path printed, on any failure, with `--keep`, or when `--workdir` is given. Full design: `docs/superpowers/specs/2026-11-19-checker-design.md`.
+
 ## Known limitation: undo of undo is not supported
 
 `undo <op_id>` is designed for **delete ops** (`delete_node`, `delete_edge`) recorded by `apply`. Undoing an undo, which amounts to redo, is **not supported, and adding it is not trivial**:
@@ -210,6 +265,12 @@ src/graph_undo/cli/             entry points: load, migrate, apply, dump
 tests/replay.py                independent replay of seed + ops, used by the tests
 tests/apply/                   apply tests; conftest.py has store, run, live_names, log_row, snapshot, requires
 tests/test_layers.py           enforces cli -> api -> db -> domain and no SQL outside db/
+src/undo_checker/              the checker: separate package, no graph_undo or sqlite3 imports
+src/undo_checker/model.py      parse dumps and reports; removed set (D0 − D1)
+src/undo_checker/invariants.py guard plus one pure check per invariant
+src/undo_checker/run.py        drives load/apply/dump/undo through uv run; ops slicing, timing
+src/undo_checker/cli.py        `check` entry point: output and exit codes
+tests/checker/                 checker tests; e2e and mutation tests need the undo entry point
 tests/                         pytest suite
 docs/superpowers/specs/     design specs
 docs/superpowers/plans/     implementation plans
