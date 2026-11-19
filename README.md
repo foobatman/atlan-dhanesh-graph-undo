@@ -79,7 +79,7 @@ uv run load fixtures/seed.jsonl --db PATH    # or any other file
 
 On success it prints `loaded graph.db: nodes=2503 edges=2801` to stderr and exits 0. A bad seed prints `<seed>:<line>: <message>` and exits 1; the database is built in `<db>.tmp` and swapped in only on success, so a failed load leaves any previous database untouched.
 
-Schema (`src/graph_undo/schema.sql`), flag-in-place: deleted rows stay with `deleted_by = <op_id>`; `NULL` means live.
+Schema (migration `src/graph_undo/db/migrations/0001_graph.sql`), flag-in-place: deleted rows stay with `deleted_by = <op_id>`; `NULL` means live.
 
 | object | what |
 |---|---|
@@ -90,6 +90,15 @@ Schema (`src/graph_undo/schema.sql`), flag-in-place: deleted rows stay with `del
 | `effective_tags` | view: `(node_id, tags)`, own tags ∪ every ancestor's along live `contains` |
 
 Full design: `docs/superpowers/specs/2026-11-19-load-design.md`.
+
+## Schema migrations
+
+```sh
+uv run migrate                # migrates ./graph.db
+uv run migrate --db PATH
+```
+
+The schema is a numbered list of SQL files in `src/graph_undo/db/migrations/` (`NNNN_<name>.sql`, gap-free, never edited once committed). `PRAGMA user_version` holds the last one applied, and only the in-house runner (`db/migrate.py`, stdlib only) sets it. `load` always builds a db at the latest version. `migrate` upgrades an older db in place, one transaction per migration, and prints `migrated graph.db: 1 -> 2` or `graph.db is up to date (2)`. It exits 1 if the db is missing or newer than the code. No command migrates implicitly.
 
 ## Known limitation: undo of undo is not supported
 
@@ -115,9 +124,11 @@ uv run pytest
 src/graph_undo/fixture/seed.py  seed generator
 src/graph_undo/fixture/ops.py   ops generator (name-keyed simulator validates every op)
 src/graph_undo/fixture/cli.py   gen-fixture CLI
-src/graph_undo/schema.sql       SQLite schema (tables, live views, effective_tags)
-src/graph_undo/store.py         connect + load_seed
-src/graph_undo/cli.py           load CLI
+src/graph_undo/domain/          pure Python graph values (no I/O, no sqlite3)
+src/graph_undo/db/              the only package with SQL: connection, migrations, Store
+src/graph_undo/db/migrations/   numbered schema migrations (0001_graph.sql: tables, live views, effective_tags)
+src/graph_undo/api/             graph rules; load.py = seed parsing/validation + atomic db swap
+src/graph_undo/cli/             entry points: load, migrate
 tests/replay.py                independent replay of seed + ops, used by the tests
 tests/                         pytest suite
 docs/superpowers/specs/     design specs

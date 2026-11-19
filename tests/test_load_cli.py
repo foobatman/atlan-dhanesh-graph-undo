@@ -2,7 +2,7 @@ import subprocess
 
 import pytest
 
-from graph_undo.cli import load_main
+from graph_undo.cli.load import main as load_main
 from graph_undo.fixture.seed import generate_seed, serialize
 
 

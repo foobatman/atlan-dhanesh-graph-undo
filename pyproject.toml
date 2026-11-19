@@ -11,7 +11,8 @@ dependencies = []
 
 [project.scripts]
 gen-fixture = "graph_undo.fixture.cli:main"
-load = "graph_undo.cli:load_main"
+load = "graph_undo.cli.load:main"
+migrate = "graph_undo.cli.migrate:main"
 
 [build-system]
 requires = ["uv_build>=0.13.8,<0.14.0"]

@@ -1,4 +1,4 @@
--- Graph store, flag-in-place model (docs/superpowers/specs/2026-11-19-load-design.md).
+-- Migration 0001: graph store, flag-in-place model (docs/superpowers/specs/2026-11-19-load-design.md).
 -- Deleted rows stay in place with deleted_by = <op_id>; reads go through the live_* views.
 
 CREATE TABLE nodes (
@@ -50,5 +50,3 @@ CREATE VIEW effective_tags AS
   )
   SELECT n.id AS node_id, COALESCE(t.tags, '[]') AS tags
     FROM live_nodes n LEFT JOIN tagged t ON t.node_id = n.id;
-
-PRAGMA user_version = 1;

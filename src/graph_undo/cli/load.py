@@ -1,16 +1,16 @@
-"""Command-line entry points: `uv run load …` (apply, undo and dump come in later specs)."""
+"""`uv run load seed.jsonl [--db graph.db]`: create the database from the seed."""
 
 from __future__ import annotations
 
 import argparse
 import sys
 
-from graph_undo.store import LoadError, load_seed
+from graph_undo.api.load import LoadError, load_seed
 
 DEFAULT_DB = "graph.db"
 
 
-def load_main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="load", description="Create the database from seed.jsonl.")
     parser.add_argument("seed", help="path to seed.jsonl")
     parser.add_argument("--db", default=DEFAULT_DB, help=f"SQLite file to (re)create (default {DEFAULT_DB})")

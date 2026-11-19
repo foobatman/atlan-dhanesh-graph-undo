@@ -4,7 +4,8 @@ import sqlite3
 import pytest
 
 from graph_undo.fixture.seed import generate_seed, serialize
-from graph_undo.store import LoadError, connect, load_seed
+from graph_undo.api.load import LoadError, load_seed
+from graph_undo.db.connection import connect
 
 
 @pytest.fixture(scope="module")
