@@ -115,3 +115,44 @@ def test_authored_fields_present(graph):
     nodes, _ = graph
     assert all(n["description"] and n["owner"] for n in nodes)
     assert len({n["owner"] for n in nodes}) >= 5
+
+
+def _refs(graph):
+    return [e for e in graph[1] if e["type"] == "references"]
+
+
+def test_references_shape(graph):
+    nodes, _ = graph
+    ids, refs = by_id(nodes), _refs(graph)
+    assert 250 <= len(refs) <= 350
+    assert all(ids[e["from_id"]]["type"] == ids[e["to_id"]]["type"] == "table" for e in refs)
+    assert all(e["from_id"] != e["to_id"] for e in refs)
+    assert len({(e["from_id"], e["to_id"]) for e in refs}) == len(refs)
+
+
+def test_references_cross_big_schema(graph):
+    _, edges = graph
+    big_id = _schemas_by_size(graph)[-1][1]
+    inside, stack, ch = set(), [big_id], children(edges)
+    while stack:
+        i = stack.pop()
+        inside.add(i)
+        stack.extend(ch.get(i, []))
+    refs = _refs(graph)
+    inbound = [e for e in refs if e["to_id"] in inside and e["from_id"] not in inside]
+    outbound = [e for e in refs if e["from_id"] in inside and e["to_id"] not in inside]
+    assert len(inbound) + len(outbound) >= 60 and inbound and outbound
+
+
+def test_edge_order(graph):
+    nodes, edges = graph
+    qn = {n["id"]: n["qualified_name"] for n in nodes}
+    types = [e["type"] for e in edges]
+    assert types == sorted(types)  # all contains, then all references
+    keys = [(qn[e["from_id"]], qn[e["to_id"]]) for e in _refs(graph)]
+    assert keys == sorted(keys)
+
+
+def test_total_lines(graph):
+    nodes, edges = graph
+    assert 4500 <= len(nodes) + len(edges) <= 5500

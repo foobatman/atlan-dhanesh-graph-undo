@@ -18,6 +18,9 @@ DATABASES_PER_CONNECTION = 2
 SCHEMAS_PER_DATABASE = 3
 TABLES_RANGE = (15, 21)
 COLUMNS_RANGE = (5, 12)
+REFERENCES_TOTAL = 300
+REFERENCES_INBOUND = 40   # other table -> big-schema table
+REFERENCES_OUTBOUND = 40  # big-schema table -> other table
 BIG_SCHEMA_TABLES = 62  # ~62 x 9.5 nodes/table => subtree comfortably >= 550
 
 TAGS = ["certified", "deprecated", "finance", "gold", "marketing", "pii", "silver"]
@@ -48,6 +51,27 @@ def _draw_tags(rng: random.Random, type_: str) -> list[str]:
     return sorted(rng.sample(TAGS, k))
 
 
+def _references(rng: random.Random, big: list[dict], other: list[dict]) -> list[dict]:
+    """Table -> table references: forced crossings of the big schema, then uniform random."""
+    tables = big + other
+    seen: set[tuple[str, str]] = set()
+    pairs: list[tuple[dict, dict]] = []
+
+    def draw(src: list[dict], dst: list[dict], count: int) -> None:
+        while count:
+            a, b = rng.choice(src), rng.choice(dst)
+            if a is not b and (a["id"], b["id"]) not in seen:
+                seen.add((a["id"], b["id"]))
+                pairs.append((a, b))
+                count -= 1
+
+    draw(other, big, REFERENCES_INBOUND)
+    draw(big, other, REFERENCES_OUTBOUND)
+    draw(tables, tables, REFERENCES_TOTAL - REFERENCES_INBOUND - REFERENCES_OUTBOUND)
+    pairs.sort(key=lambda p: (p[0]["qualified_name"], p[1]["qualified_name"]))
+    return [{"from_id": a["id"], "to_id": b["id"], "type": "references"} for a, b in pairs]
+
+
 def generate_seed(seed: int) -> tuple[list[dict], list[dict]]:
     """Build the seed graph: nodes in DFS pre-order, then edges (contains in the same order)."""
     rng = random.Random(seed)
@@ -56,6 +80,8 @@ def generate_seed(seed: int) -> tuple[list[dict], list[dict]]:
     total_schemas = len(CONNECTIONS) * DATABASES_PER_CONNECTION * SCHEMAS_PER_DATABASE
     big_schema_index = rng.randrange(total_schemas)
     schema_index = 0
+    big_tables: list[dict] = []
+    other_tables: list[dict] = []
 
     def add(type_: str, name: str, parent: dict | None) -> dict:
         qn = name if parent is None else f"{parent['qualified_name']}/{name}"
@@ -80,11 +106,13 @@ def generate_seed(seed: int) -> tuple[list[dict], list[dict]]:
             db = add("database", db_name, conn)
             for schema_name in _unique_names(rng, SCHEMAS, SCHEMAS_PER_DATABASE):
                 schema = add("schema", schema_name, db)
-                n_tables = (BIG_SCHEMA_TABLES if schema_index == big_schema_index
-                            else rng.randint(*TABLES_RANGE))
+                is_big = schema_index == big_schema_index
+                n_tables = BIG_SCHEMA_TABLES if is_big else rng.randint(*TABLES_RANGE)
                 schema_index += 1
                 for table_name in _unique_names(rng, TABLE_WORDS, n_tables):
                     table = add("table", table_name, schema)
+                    (big_tables if is_big else other_tables).append(table)
                     for col_name in _unique_names(rng, COLUMN_WORDS, rng.randint(*COLUMNS_RANGE)):
                         add("column", col_name, table)
+    edges.extend(_references(rng, big_tables, other_tables))
     return nodes, edges
