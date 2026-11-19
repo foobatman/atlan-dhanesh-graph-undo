@@ -23,7 +23,7 @@
 4. **Soft delete, one row, one transaction (the key requirement).** Inside the transaction `apply_op` opened:
    - `edges.mark_deleted([e.id], op.op_id)`: sets `deleted_by = op_id` on that single row;
    - `log.record(LoggedOp(...))`: `op='delete_edge'`, `effect='applied'`, `node_id=NULL`, `edge_id=e.id`, `before=NULL`, `payload=canonical(op.raw)`, actor kind and name;
-   - `log.add_removals(op.op_id, [], [e.id])`: exactly one row, `('<op_id>', 'edge', str(e.id))`.
+   - `log.add_removals(op.op_id, [], [e.id])`: exactly one `removed_edges` row, `('<op_id>', e.id)`, and no `removed_nodes` row.
 
    `record` must run before `add_removals`, because `removals.op_id REFERENCES ops(op_id)` and foreign keys are on. The order of `mark_deleted` doesn't matter. The handler never hard-deletes and never touches `nodes`. Returns `OpResult(op_id, "applied", edge_id=e.id, removed_edges=1)`. There is no `noop` outcome: an edge that isn't live is an error, not a no-op (contract: "the edge must exist").
 5. **Deleting a `contains` edge** leaves the child live and parentless (`live_parent` returns `None`). Through the `effective_tags` view, the child and its whole live subtree immediately lose the tags of the old parent and the old parent's ancestors, while keeping their own tags and the tags of ancestors inside the subtree. Nothing is stored, because the view derives it.

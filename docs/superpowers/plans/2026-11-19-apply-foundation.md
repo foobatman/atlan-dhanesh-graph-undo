@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** The layered package (`domain` / `db` / `api` / `cli`), an in-house migration runner with migrations `0001` (graph) and `0002` (`ops`, `removals`), typed op parsing and errors, the handler registry, and `uv run apply`. Per-op handlers then plug in.
+**Goal:** The layered package (`domain` / `db` / `api` / `cli`), an in-house migration runner with migrations `0001` (graph) and `0002` (`ops`, `removed_nodes`, `removed_edges`), typed op parsing and errors, the handler registry, and `uv run apply`. Per-op handlers then plug in.
 
 **Architecture:**
 - The dependency direction is `cli → api → db → domain`, and `api` also imports `domain`.
@@ -116,7 +116,7 @@
 
 ### Task 3: Migration `0002` and repositories
 
-**Files:** Create `db/migrations/0002_oplog.sql` (`ops`, `removals`). Create `db/nodes.py`, `db/edges.py` and `db/oplog.py`, and extend `db/store.py` with `Store(con)` and `mint_node_id`. Test: `tests/apply/test_repos.py`.
+**Files:** Create `db/migrations/0002_oplog.sql` (`ops`, `removed_nodes`, `removed_edges`, as in the spec). Create `db/nodes.py`, `db/edges.py` and `db/oplog.py`, and extend `db/store.py` with `Store(con)` and `mint_node_id`. Test: `tests/apply/test_repos.py`.
 
 **Interfaces produced** are the method lists in the spec's "Repositories" section, plus any additions the per-op specs request under "Foundation changes requested". Also `LoggedOp`, a dataclass mirroring the `ops` columns except `seq`.
 
@@ -128,7 +128,8 @@
   - `mark_deleted` leaves already-dead rows' `deleted_by` unchanged.
   - `EdgeRepo.insert` returns an `Edge` with a new id.
   - `OpLogRepo.record` and `get` round-trip.
-  - `add_removals` and `removals` round-trip.
+  - `add_removals` and `removals` round-trip; edge ids come back as `int`.
+  - A removal naming a node or edge id that doesn't exist, or an `op_id` not in `ops`, raises `sqlite3.IntegrityError`.
   - Recording an `op_id` twice raises `sqlite3.IntegrityError`.
   - `mint_node_id("op-0001")` is stable and equals the uuid5 above.
   - `load` produces `user_version == LATEST == 2` and an empty `ops` table.
@@ -136,7 +137,7 @@
 - [ ] **Step 2: Run** → FAIL.
 - [ ] **Step 3: Implement** the code. `live_subtree_ids` is a recursive CTE over `live_edges`, so it is one query. Every repository method is set-based; no per-row loops over a subtree.
 - [ ] **Step 4: Run** → PASS, and the full suite is green.
-- [ ] **Step 5: Commit** `feat: migration 0002 (ops, removals) and repositories`.
+- [ ] **Step 5: Commit** `feat: migration 0002 (op log, removals) and repositories`.
 
 ### Task 4: Registry, `apply_file` and `uv run apply`
 

@@ -65,7 +65,7 @@ Short names below: T=`conn/db/sc/t`, U=`conn/db/sc/u`, K=`conn/db/sc/t/k`, S=`co
     - `payload == canonical(op dict)`.
 
     `ops` has exactly one row.
-  - `test_removals_match_deleted_by`: after the delete, `store.log.removals("op-0001") == ([], [id])`. The raw `removals` table has exactly one row, `("op-0001", "edge", str(id))`. For every `removals` row of kind `edge`, `edges.deleted_by` of that `item_id` equals its `op_id`. Run this check after every multi-op test too, through the helper `assert_removals_consistent(store)`.
+  - `test_removals_match_deleted_by`: after the delete, `store.log.removals("op-0001") == ([], [id])`. The raw `removed_edges` table has exactly one row, `("op-0001", id)`, and `removed_nodes` has none for op-0001. For every `removed_edges` row, `edges.deleted_by` of that `edge_id` equals its `op_id`. Run this check after every multi-op test too, through the helper `assert_removals_consistent(store)`.
   - `test_reverse_direction_untouched`: `a = seed_ref(T, U)` and `b = seed_ref(U, T)`. Delete T→U. `a` is dead, `b` has `deleted_by is None` and is still in `live_edges`.
   - `test_wrong_type_is_edge_not_found`: S→T `contains` exists, and there's no reference S→T. `run(de(S, T, "references"))` raises `EdgeNotFound`, with `str` equal to `"op-0001 edge_not_found: no live references edge 'conn/db/sc' -> 'conn/db/sc/t'"`. The contains edge is still live.
   - `test_other_type_same_endpoints_survives`: `seed_ref(T, K, "references")` alongside the contains T→K. Delete the reference. The contains T→K is still live and `live_parent(k)` is unchanged.

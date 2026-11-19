@@ -18,14 +18,14 @@
   1. `edges.mark_deleted(E, op_id)`: every row in E gets `deleted_by = op_id`.
   2. `nodes.mark_deleted(N, op_id)`: every row in N gets `deleted_by = op_id`.
   3. `log.record(...)`: the op-log row, with `op = 'delete_node'`, `effect = 'applied'`, `node_id = root id`, `edge_id = NULL`, `before = NULL`, `payload = canonical(op.raw)`.
-  4. `log.add_removals(op_id, N, E)`: one `removals` row per removed node (`kind='node'`) and per removed edge (`kind='edge'`, id as text).
+  4. `log.add_removals(op_id, N, E)`: one `removed_nodes` row per node in N and one `removed_edges` row per edge in E.
 
   Edges go before nodes, so no statement leaves a live edge pointing at a dead node. The log row goes before `removals` because `removals.op_id` references `ops(op_id)` and foreign keys are on.
 - **Rows already dead are untouched.** A dead row is never in N or E (both are computed from live rows only), and `mark_deleted` only updates `deleted_by IS NULL` rows. So a reference removed earlier by `delete_edge`, the old `contains` edge of a child moved out, and the dead rows of an earlier incarnation of the same name all keep their original `deleted_by`. They get no `removals` row from this op.
 - **Exactness invariant** (holds for every `delete_node` at commit, tested directly):
   - every `removals` row of this op names a row whose `deleted_by = op_id`;
   - every row whose `deleted_by = op_id` has a `removals` row of this op;
-  - `|removals(kind='node')| = OpResult.removed_nodes = |N|`, the same for edges.
+  - `|removed_nodes(op_id)| = OpResult.removed_nodes = |N|`, and `|removed_edges(op_id)| = removed_edges = |E|`.
 - **Graph invariant kept:** after the op, every live edge has two live endpoints, and live `contains` is still a forest.
 - **Names freed:** every name in N is free for reuse at once (the `live_name` index is partial). A later `add_node` of the same name mints a new id. A later `delete_node` of that name resolves to the new id and flags only new rows.
 - **`effective_tags`:** survivors are recomputed by the view, never stored. A survivor's ancestors are all survivors, so its value is unchanged; removed nodes drop out of the view.

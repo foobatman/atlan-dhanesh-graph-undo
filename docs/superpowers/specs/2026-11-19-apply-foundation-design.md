@@ -175,7 +175,7 @@ Error handling across the layers:
    - `EditNode.set` is guaranteed non-empty, with known keys only.
 3. **`canonical(d) -> str`** lives in `domain/ops.py`: `json.dumps(d, sort_keys=True, separators=(",",":"), ensure_ascii=False)`. It is used for `ops.payload` (the op exactly as received, tags not normalised), for `ops.before`, and for the `OpIdConflict` comparison.
 4. **`LoggedOp`** (`db/oplog.py`) is a frozen dataclass whose fields mirror the `ops` columns, minus `seq`: `op_id, actor_kind, actor_name, op, effect, node_id, edge_id, before, payload`.
-5. **Write order inside one op:** graph rows first, then `log.record(...)`, then `log.add_removals(...)`. `removals.op_id` has a foreign key to `ops.op_id`, so the log row must exist first.
+5. **Write order inside one op:** graph rows first, then `log.record(...)`, then `log.add_removals(...)`. `removed_*.op_id` has a foreign key to `ops.op_id`, so the log row must exist first.
 6. **`mark_deleted` returns the number of rows it updated.** Delete handlers assert that the number equals the count of ids passed; a mismatch is a bug. Id lists go to SQL as one `json_each(?)` parameter, so each call is a single statement.
 7. **`update_fields(node_id, fields)`** takes domain values (`tags` as a tuple, encoded by the repo). It raises `ValueError` on keys outside description/owner/tags; that is a programming error, not an `OpError`.
 8. **Per-op tests that need another op's handler** use `pytest.skip` until that handler is in `HANDLERS`. All other setup goes directly through the repositories, so the per-op plans can land in any order.
@@ -196,17 +196,48 @@ CREATE TABLE ops (
   payload    TEXT NOT NULL                    -- the op line as received, compact sorted JSON
 );
 
-CREATE TABLE removals (
+-- "removals": what each delete op removed. Two typed tables, so each id carries a real foreign key.
+CREATE TABLE removed_nodes (
   op_id   TEXT NOT NULL REFERENCES ops(op_id),
-  kind    TEXT NOT NULL CHECK (kind IN ('node','edge')),
-  item_id TEXT NOT NULL,                       -- node id, or edge id as text
-  PRIMARY KEY (op_id, kind, item_id)
+  node_id TEXT NOT NULL REFERENCES nodes(id),
+  PRIMARY KEY (op_id, node_id)
 );
+CREATE TABLE removed_edges (
+  op_id   TEXT NOT NULL REFERENCES ops(op_id),
+  edge_id INTEGER NOT NULL REFERENCES edges(id),
+  PRIMARY KEY (op_id, edge_id)
+);
+CREATE INDEX removed_nodes_by_node ON removed_nodes(node_id);   -- "which deletes ever removed this node?"
+CREATE INDEX removed_edges_by_edge ON removed_edges(edge_id);
 ```
 
-- **Who writes `removals`:** only `delete_node` and `delete_edge` write rows. Every row they add has a matching `deleted_by = op_id` on the node or edge, set in the same transaction.
+- **"Removals"** in this and the per-op specs means the two tables `removed_nodes` and `removed_edges`. Edge ids stay integers and every id has a foreign key, so a removal can never point at a row that doesn't exist. `OpLogRepo.add_removals(op_id, node_ids, edge_ids)` and `removals(op_id) -> (node_ids, edge_ids)` hide the split.
+- **Who writes removals:** only `delete_node` and `delete_edge` write rows. Every row they add has a matching `deleted_by = op_id` on the node or edge, set in the same transaction.
 - **Ids are names resolved at apply time.** The log stores ids, never names, because a name can point to different nodes over time.
 - **Migrations:** these tables arrive in migration `0002`. See "Schema migrations" below.
+
+## What undo can query (readiness checklist)
+
+The undo spec will build only on these facts. Each one is written by apply as described above.
+
+| Undo needs | Query |
+|---|---|
+| Everything delete X removed (invariant 4) | `removed_nodes` and `removed_edges` `WHERE op_id = X` |
+| When X happened, relative to other ops | `ops.seq WHERE op_id = X` |
+| A removed node's authored fields at delete time (invariant 2) | its own row in `nodes`. Dead rows are never edited, because ops resolve live names only and `mark_deleted` skips dead rows. |
+| A removed node's parent at delete time | the `contains` row in `removed_edges(X)` whose `to_id` is that node |
+| Whether a name is live now, and who created that node | `live_nodes`, then the `ops` row with `op = 'add_node'` and `node_id` = that id, giving `actor_kind` and `seq` |
+| Human changes after X (invariant 1) | `ops` rows `WHERE seq > seq(X) AND actor_kind = 'human'`: `edit_node` (`node_id` and the keys of `before`), `add_node`, `add_edge`, `delete_edge`, `delete_node` |
+| Whether a removed edge was later removed again by someone else | `edges.deleted_by`, and `removed_edges` rows for the same `edge_id` with other `op_id`s (index `removed_edges_by_edge`) |
+| Whether an endpoint died in a later delete | `nodes.deleted_by` → `ops.op`, `actor_kind` |
+| Ingest activity on a name after X (caused changes) | `ops` rows with `actor_kind = 'ingest'` and `seq > seq(X)`, including `noop` rows |
+
+**Left for the undo spec:**
+- how undo records its own writes, including whether it logs into `ops` or gets its own tables;
+- `CRASH_AFTER`;
+- the report.
+
+The `CHECK` lists on `ops.op` and `ops.effect` cover apply's five ops only. If undo logs into `ops`, its migration rebuilds that table (SQLite can't alter a `CHECK`). Giving undo its own tables avoids that.
 
 ## Schema migrations (in-house runner, stdlib only)
 
