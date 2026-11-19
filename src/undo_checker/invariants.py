@@ -153,3 +153,146 @@ def inv8_timing(scenario_s: float, total_s: float, limit: float = 60.0) -> Resul
     if scenario_s < limit:
         return Result("PASS", summary)
     return Result("FAIL", summary, (f"scenario took {scenario_s:.1f} s, limit {limit:.0f} s",))
+
+
+# --- 1: frame (no human change lost or altered) --------------------------
+
+NAME_KEYS = ("node", "parent", "from", "to", "qualified_name")
+
+
+def human_ops_on(ops_lines: list[dict], qn: str) -> list[str]:
+    return [o.get("op_id", "?") for o in ops_lines
+            if (o.get("actor") or {}).get("kind") == "human" and any(o.get(k) == qn for k in NAME_KEYS)]
+
+
+def inv1_frame(d2: Dump, d3: Dump, rem: Removed, ops_lines: list[dict]) -> Result:
+    def hint(qn: str) -> str:
+        ids = human_ops_on(ops_lines, qn)
+        return f" (human ops on {qn}: {', '.join(ids)})" if ids else ""
+
+    v = []
+    for i in sorted(d2.nodes):
+        qn = d2.nodes[i]["qualified_name"]
+        if i not in d3.nodes:
+            v.append(f"node {_qn(d2, i)} was live before undo and is gone after{hint(qn)}")
+            continue
+        for k in COMPARE:
+            if fields(d2.nodes[i], (k,)) != fields(d3.nodes[i], (k,)):
+                v.append(f"node {_qn(d2, i)} {k} changed: {d2.nodes[i].get(k)!r} -> {d3.nodes[i].get(k)!r}{hint(qn)}")
+    for e in sorted(d2.edges - d3.edges):
+        v.append(f"edge {e} was live before undo and is gone after")
+    added_nodes = set(d3.nodes) - set(d2.nodes)
+    for i in sorted(added_nodes - set(rem.nodes)):
+        v.append(f"node {_qn(d3, i)} added by undo but the delete never removed it")
+    added_edges = d3.edges - d2.edges
+    for e in sorted(added_edges - rem.edges):
+        if not (e[2] == "contains" and e[1] in added_nodes):
+            v.append(f"edge {e} added by undo but the delete never removed it")
+    return _result(v, f"frame: {len(d2.nodes)} nodes, {len(d2.edges)} edges unchanged; "
+                      f"{len(added_nodes)} nodes, {len(added_edges)} edges added")
+
+
+# --- 2: eligible removed nodes restored intact (by name) -----------------
+
+def _report_index(report) -> tuple[dict[str, dict], dict[tuple, dict]]:
+    nodes, edges = {}, {}
+    for line in report:
+        o = line.obj
+        if not o:
+            continue
+        if o.get("kind") == "node" and "id" in o:
+            nodes.setdefault(o["id"], o)
+        elif o.get("kind") == "edge":
+            edges.setdefault((o.get("from_id"), o.get("to_id"), o.get("type")), o)
+    return nodes, edges
+
+
+def inv2_restored(d0: Dump, d2: Dump, d3: Dump, rem: Removed, report) -> Result:
+    live2 = d2.names()
+    live3 = d3.names()
+    rep_nodes, _ = _report_index(report)
+    v, eligible = [], 0
+    for i in sorted(rem.nodes, key=lambda i: (rem.nodes[i]["qualified_name"], i)):
+        n = rem.nodes[i]
+        if n["qualified_name"] in live2:
+            continue
+        p = rem.parent0.get(i)
+        holder = None
+        if p is not None:
+            pn = d0.nodes[p]
+            holders = [h for h in live3.get(pn["qualified_name"], []) if d3.nodes[h]["type"] == pn["type"]]
+            if not holders:
+                continue
+            holder = holders[0]
+        eligible += 1
+        label = _qn(d0, i)
+        if i not in d3.nodes:
+            v.append(f"node {label} is eligible but not live after undo")
+            continue
+        if fields(n, COMPARE) != fields(d3.nodes[i], COMPARE):
+            diff = [k for k in COMPARE if fields(n, (k,)) != fields(d3.nodes[i], (k,))]
+            v.append(f"node {label} restored with changed {', '.join(diff)}")
+        got = d3.parent.get(i)
+        if got != holder:
+            v.append(f"node {label} has parent {got}, expected {holder}")
+        outcome = (rep_nodes.get(i) or {}).get("outcome")
+        if outcome != "restored":
+            v.append(f"node {label} report says {outcome!r}, expected 'restored'")
+    if eligible == 0:
+        return Result("FAIL", "vacuous: no eligible removed node")
+    return _result(v, f"{eligible} eligible nodes restored intact")
+
+
+# --- 4: report accounts for every removed item exactly once --------------
+
+OUTCOMES = ("restored", "merged", "skipped")
+
+
+def inv4_report(report, rem: Removed, d3: Dump) -> Result:
+    v = []
+    if not report:
+        v.append("report is empty")
+    node_count: dict[str, int] = {}
+    edge_count: dict[tuple, int] = {}
+    for line in report:
+        if line.error:
+            v.append(f"report line {line.lineno}: {line.error}")
+            continue
+        o = line.obj
+        kind, outcome = o.get("kind"), o.get("outcome")
+        if kind not in ("node", "edge"):
+            v.append(f"report line {line.lineno}: kind {kind!r} is not node or edge")
+            continue
+        if outcome not in OUTCOMES:
+            v.append(f"report line {line.lineno}: outcome {outcome!r} is not one of {', '.join(OUTCOMES)}")
+        elif outcome != "restored" and not o.get("reason"):
+            v.append(f"report line {line.lineno}: {outcome} without a reason")
+        if kind == "node":
+            i = o.get("id")
+            node_count[i] = node_count.get(i, 0) + 1
+            if outcome == "restored" and i not in d3.nodes:
+                v.append(f"node {i} reported restored but not live after undo")
+            if outcome == "skipped" and i in d3.nodes:
+                v.append(f"node {i} reported skipped but live after undo")
+        else:
+            e = (o.get("from_id"), o.get("to_id"), o.get("type"))
+            edge_count[e] = edge_count.get(e, 0) + 1
+            if outcome == "restored" and e not in d3.edges:
+                v.append(f"edge {e} reported restored but not live after undo")
+            if outcome == "merged" and (e[1] not in d3.nodes or e[1] not in d3.parent):
+                v.append(f"edge {e} reported merged but child {e[1]} has no contains parent after undo")
+    for i, k in sorted(node_count.items(), key=lambda kv: str(kv[0])):
+        if k > 1:
+            v.append(f"node {i} reported {k} times")
+        if i not in rem.nodes:
+            v.append(f"node {i} reported but the delete never removed it")
+    for e, k in sorted(edge_count.items(), key=lambda kv: str(kv[0])):
+        if k > 1:
+            v.append(f"edge {e} reported {k} times")
+        if e not in rem.edges:
+            v.append(f"edge {e} reported but the delete never removed it")
+    for i in sorted(set(rem.nodes) - set(node_count)):
+        v.append(f"node {i} ({rem.nodes[i]['qualified_name']}) removed but not reported")
+    for e in sorted(rem.edges - set(edge_count)):
+        v.append(f"edge {e} removed but not reported")
+    return _result(v, f"{len(rem.nodes)} nodes, {len(rem.edges)} edges, each reported once")
