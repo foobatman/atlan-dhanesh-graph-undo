@@ -61,3 +61,57 @@ def test_nodes_in_preorder(graph):
     for e in edges:
         if e["type"] == "contains":
             assert pos[e["from_id"]] < pos[e["to_id"]]
+
+
+TAGS = {"pii", "gold", "silver", "finance", "marketing", "certified", "deprecated"}
+
+
+def _schemas_by_size(graph):
+    nodes, edges = graph
+    ch = children(edges)
+    return sorted((subtree_size(n["id"], ch), n["id"]) for n in nodes if n["type"] == "schema")
+
+
+def test_big_schema(graph):
+    sizes = _schemas_by_size(graph)
+    assert sizes[-1][0] >= 550
+    assert sizes[-2][0] < 500  # exactly one big schema
+
+
+def test_node_totals(graph):
+    nodes, _ = graph
+    assert 2400 <= len(nodes) <= 2600
+
+
+def test_tags_valid(graph):
+    nodes, _ = graph
+    for n in nodes:
+        assert set(n["tags"]) <= TAGS and len(n["tags"]) <= 2
+        assert n["tags"] == sorted(set(n["tags"]))
+
+
+def test_inheritance_is_exercised(graph):
+    nodes, _ = graph
+    upper = [n for n in nodes if n["type"] in ("database", "schema")]
+    assert sum(bool(n["tags"]) for n in upper) >= 0.2 * len(upper)
+
+
+def test_redundant_inherited_tag_exists(graph):
+    nodes, edges = graph
+    ids = by_id(nodes)
+    parent = {e["to_id"]: e["from_id"] for e in edges if e["type"] == "contains"}
+
+    def ancestor_tags(i):
+        out = set()
+        while i in parent:
+            i = parent[i]
+            out |= set(ids[i]["tags"])
+        return out
+
+    assert any(set(n["tags"]) & ancestor_tags(n["id"]) for n in nodes)
+
+
+def test_authored_fields_present(graph):
+    nodes, _ = graph
+    assert all(n["description"] and n["owner"] for n in nodes)
+    assert len({n["owner"] for n in nodes}) >= 5

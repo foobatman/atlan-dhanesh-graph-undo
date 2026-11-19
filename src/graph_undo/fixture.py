@@ -18,6 +18,17 @@ DATABASES_PER_CONNECTION = 2
 SCHEMAS_PER_DATABASE = 3
 TABLES_RANGE = (15, 21)
 COLUMNS_RANGE = (5, 12)
+BIG_SCHEMA_TABLES = 62  # ~62 x 9.5 nodes/table => subtree comfortably >= 550
+
+TAGS = ["certified", "deprecated", "finance", "gold", "marketing", "pii", "silver"]
+# Weights for drawing 0, 1 or 2 own tags, per node type.
+TAG_WEIGHTS = {
+    "connection": [60, 30, 10],
+    "database": [55, 35, 10],
+    "schema": [60, 30, 10],
+    "table": [55, 35, 10],
+    "column": [80, 17, 3],
+}
 
 
 def _make_id(rng: random.Random) -> str:
@@ -32,11 +43,19 @@ def _unique_names(rng: random.Random, words: list[str], count: int) -> list[str]
             for i in range(count)]
 
 
+def _draw_tags(rng: random.Random, type_: str) -> list[str]:
+    k = rng.choices([0, 1, 2], weights=TAG_WEIGHTS[type_])[0]
+    return sorted(rng.sample(TAGS, k))
+
+
 def generate_seed(seed: int) -> tuple[list[dict], list[dict]]:
     """Build the seed graph: nodes in DFS pre-order, then edges (contains in the same order)."""
     rng = random.Random(seed)
     nodes: list[dict] = []
     edges: list[dict] = []
+    total_schemas = len(CONNECTIONS) * DATABASES_PER_CONNECTION * SCHEMAS_PER_DATABASE
+    big_schema_index = rng.randrange(total_schemas)
+    schema_index = 0
 
     def add(type_: str, name: str, parent: dict | None) -> dict:
         qn = name if parent is None else f"{parent['qualified_name']}/{name}"
@@ -48,7 +67,7 @@ def generate_seed(seed: int) -> tuple[list[dict], list[dict]]:
             "type": type_,
             "description": where,
             "owner": rng.choice(OWNERS),
-            "tags": [],
+            "tags": _draw_tags(rng, type_),
         }
         nodes.append(node)
         if parent is not None:
@@ -61,7 +80,10 @@ def generate_seed(seed: int) -> tuple[list[dict], list[dict]]:
             db = add("database", db_name, conn)
             for schema_name in _unique_names(rng, SCHEMAS, SCHEMAS_PER_DATABASE):
                 schema = add("schema", schema_name, db)
-                for table_name in _unique_names(rng, TABLE_WORDS, rng.randint(*TABLES_RANGE)):
+                n_tables = (BIG_SCHEMA_TABLES if schema_index == big_schema_index
+                            else rng.randint(*TABLES_RANGE))
+                schema_index += 1
+                for table_name in _unique_names(rng, TABLE_WORDS, n_tables):
                     table = add("table", table_name, schema)
                     for col_name in _unique_names(rng, COLUMN_WORDS, rng.randint(*COLUMNS_RANGE)):
                         add("column", col_name, table)
