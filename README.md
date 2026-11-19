@@ -78,8 +78,9 @@ uv run pytest
 ## Layout
 
 ```
-src/graph_undo/fixture.py      seed generator + gen-fixture CLI
-src/graph_undo/ops_fixture.py  ops generator (name-keyed simulator validates every op)
+src/graph_undo/fixture/seed.py  seed generator
+src/graph_undo/fixture/ops.py   ops generator (name-keyed simulator validates every op)
+src/graph_undo/fixture/cli.py   gen-fixture CLI
 tests/replay.py                independent replay of seed + ops, used by the tests
 tests/                         pytest suite
 docs/superpowers/specs/     design specs

@@ -1,4 +1,4 @@
-"""Independent replay of seed + ops, written from the ops spec. Must not import graph_undo.ops_fixture."""
+"""Independent replay of seed + ops, written from the ops spec. Must not import graph_undo.fixture.ops."""
 
 from __future__ import annotations
 

@@ -9,7 +9,7 @@ from __future__ import annotations
 import random
 from collections import defaultdict
 
-from graph_undo.fixture import OWNERS, TAGS
+from graph_undo.fixture.seed import OWNERS, TAGS
 
 INGEST = "ingest-crawler"
 LEVEL = {"connection": 0, "database": 1, "schema": 2, "table": 3, "column": 4}

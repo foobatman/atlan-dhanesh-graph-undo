@@ -1,7 +1,8 @@
 import json
 import subprocess
 
-from graph_undo.fixture import generate_seed, main, serialize
+from graph_undo.fixture.cli import main
+from graph_undo.fixture.seed import generate_seed, serialize
 
 
 def test_deterministic_bytes():
@@ -46,7 +47,7 @@ def test_entry_point(tmp_path):
 
 
 def test_main_writes_ops(tmp_path, capsys):
-    from graph_undo.ops_fixture import generate_ops
+    from graph_undo.fixture.ops import generate_ops
 
     assert main(["--seed", "42", "--out", str(tmp_path)]) == 0
     nodes, edges = generate_seed(42)

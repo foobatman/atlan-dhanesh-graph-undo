@@ -2,8 +2,8 @@ import pytest
 SEEDS = [42]  # default seed only (partner: seed variety not important)
 from replay import apply, load, replay
 
-from graph_undo.fixture import generate_seed
-from graph_undo.ops_fixture import generate_ops
+from graph_undo.fixture.seed import generate_seed
+from graph_undo.fixture.ops import generate_ops
 
 COMMON = {"op_id", "actor", "op"}
 FIELDS = {

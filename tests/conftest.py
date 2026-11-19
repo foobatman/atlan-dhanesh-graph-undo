@@ -1,6 +1,6 @@
 import pytest
 
-from graph_undo.fixture import generate_seed
+from graph_undo.fixture.seed import generate_seed
 
 
 # 42 is the default; the others include seeds the review found off-spec (6, 61, 101, 252).
