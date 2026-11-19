@@ -15,10 +15,14 @@ load = "graph_undo.cli.load:main"
 migrate = "graph_undo.cli.migrate:main"
 apply = "graph_undo.cli.apply:main"
 dump = "graph_undo.cli.dump:main"
+check = "undo_checker.cli:main"
 
 [build-system]
 requires = ["uv_build>=0.13.8,<0.14.0"]
 build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = ["graph_undo", "undo_checker"]
 
 [dependency-groups]
 dev = [

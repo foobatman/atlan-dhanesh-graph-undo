@@ -92,3 +92,33 @@ def test_no_sql_outside_db(path):
 def test_sql_files_only_in_db():
     for p in SRC.rglob("*.sql"):
         assert layer_of(p) == "db", p
+
+
+# Checker isolation (spec: checker-design, "Code layout"): the checker shares no code with the tool.
+CHECKER = SRC.parent / "undo_checker"
+
+
+def checker_imports(path: Path) -> set[str]:
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    out = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            out.update(a.name for a in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            out.add("undo_checker" if node.level else node.module)
+    return {m.split(".")[0] for m in out}
+
+
+def test_checker_package_exists():
+    assert (CHECKER / "__init__.py").exists()
+
+
+@pytest.mark.parametrize("path", sorted(CHECKER.glob("*.py")), ids=lambda p: p.name)
+def test_checker_isolated(path):
+    tops = checker_imports(path)
+    assert not tops & {"graph_undo", "sqlite3"}, f"{path.name} imports {sorted(tops & {'graph_undo', 'sqlite3'})}"
+
+
+def test_tool_does_not_import_checker():
+    bad = [str(p.relative_to(SRC)) for p in modules() if "undo_checker" in checker_imports(p)]
+    assert not bad, bad
