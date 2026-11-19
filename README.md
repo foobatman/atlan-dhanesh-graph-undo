@@ -79,7 +79,7 @@ uv run load fixtures/seed.jsonl --db PATH    # or any other file
 
 On success it prints `loaded graph.db: nodes=2503 edges=2801` to stderr and exits 0. A bad seed prints `<seed>:<line>: <message>` and exits 1; the database is built in `<db>.tmp` and swapped in only on success, so a failed load leaves any previous database untouched.
 
-Schema (migration `src/graph_undo/db/migrations/0001_graph.sql`), flag-in-place: deleted rows stay with `deleted_by = <op_id>`; `NULL` means live.
+Schema (migrations `src/graph_undo/db/migrations/0001_graph.sql` and `0002_oplog.sql`), flag-in-place: deleted rows stay with `deleted_by = <op_id>`; `NULL` means live.
 
 | object | what |
 |---|---|
@@ -88,6 +88,8 @@ Schema (migration `src/graph_undo/db/migrations/0001_graph.sql`), flag-in-place:
 | unique indexes | among live rows only: `qualified_name`; `(from_id, to_id, type)`; one `contains` parent per node |
 | `live_nodes`, `live_edges` | views without deleted rows: read graph state through these |
 | `effective_tags` | view: `(node_id, tags)`, own tags ∪ every ancestor's along live `contains` |
+| `ops` (0002) | op log, one row per applied op: `seq` (apply order), `op_id`, `actor_kind`, `actor_name`, `op`, `effect` (`applied`/`noop`), `node_id`, `edge_id`, `before` (edit_node's previous values, JSON), `payload` (the op as received, compact sorted JSON) |
+| `removed_nodes`, `removed_edges` (0002) | what each delete op removed: `(op_id, node_id)` / `(op_id, edge_id)`, foreign keys to `ops`, `nodes`, `edges` |
 
 Full design: `docs/superpowers/specs/2026-11-19-load-design.md`.
 
@@ -125,8 +127,8 @@ src/graph_undo/fixture/seed.py  seed generator
 src/graph_undo/fixture/ops.py   ops generator (name-keyed simulator validates every op)
 src/graph_undo/fixture/cli.py   gen-fixture CLI
 src/graph_undo/domain/          pure Python graph values (no I/O, no sqlite3)
-src/graph_undo/db/              the only package with SQL: connection, migrations, Store
-src/graph_undo/db/migrations/   numbered schema migrations (0001_graph.sql: tables, live views, effective_tags)
+src/graph_undo/db/              the only package with SQL: connection, migrations, Store (.nodes, .edges, .log repositories)
+src/graph_undo/db/migrations/   numbered schema migrations (0001 graph tables + views, 0002 op log + removals)
 src/graph_undo/api/             graph rules; load.py = seed parsing/validation + atomic db swap
 src/graph_undo/cli/             entry points: load, migrate
 tests/replay.py                independent replay of seed + ops, used by the tests

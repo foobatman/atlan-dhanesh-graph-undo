@@ -112,7 +112,6 @@ def _db_at_version_1(tmp_path):
     return db
 
 
-@pytest.mark.skipif(LATEST < 2, reason="needs migration 0002 (Task 3)")
 def test_migrate_cli(tmp_path, capsys, monkeypatch):
     from graph_undo.cli.migrate import main
 
@@ -142,7 +141,6 @@ def test_migrate_cli_newer_db(tmp_path, capsys):
     assert "newer" in capsys.readouterr().err
 
 
-@pytest.mark.skipif(LATEST < 2, reason="needs migration 0002 (Task 3)")
 def test_migrate_entry_point(tmp_path):
     import subprocess
 

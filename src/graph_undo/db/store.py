@@ -1,24 +1,28 @@
-"""Store: one connection plus the repositories. Also the bulk seed insert used by load."""
+"""Store: one connection plus the repositories (.nodes, .edges, .log). Also the bulk seed insert used by load."""
 
 from __future__ import annotations
 
-import json
 import sqlite3
+import uuid
 from collections.abc import Iterable
 from pathlib import Path
 
+from graph_undo.db.codec import encode_tags
 from graph_undo.db.connection import connect
+from graph_undo.db.edges import EdgeRepo
+from graph_undo.db.nodes import NodeRepo
+from graph_undo.db.oplog import OpLogRepo
 from graph_undo.domain.model import Node
 
-
-def encode_tags(tags: Iterable[str]) -> str:
-    """Tags as stored: compact JSON array, sorted and duplicate-free."""
-    return json.dumps(sorted(set(tags)), separators=(",", ":"), ensure_ascii=False)
+NAMESPACE = uuid.UUID("6f1c3a52-0d8e-4c1e-9b7a-2f4d5e6a7b8c")
 
 
 class Store:
     def __init__(self, con: sqlite3.Connection):
         self.con = con
+        self.nodes = NodeRepo(con)
+        self.edges = EdgeRepo(con)
+        self.log = OpLogRepo(con)
 
     @classmethod
     def open(cls, path: str | Path) -> "Store":
@@ -26,6 +30,11 @@ class Store:
 
     def close(self) -> None:
         self.con.close()
+
+    @staticmethod
+    def mint_node_id(op_id: str) -> str:
+        """Deterministic id for the node created by op_id: uuid5(NAMESPACE, op_id)."""
+        return str(uuid.uuid5(NAMESPACE, op_id))
 
     def bulk_load(self, nodes: Iterable[Node], edges: Iterable[tuple[str, str, str]]) -> None:
         """Insert seed rows in the given order (edge ids follow `edges` order). Caller owns the transaction."""

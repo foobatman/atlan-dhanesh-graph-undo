@@ -69,7 +69,7 @@ def test_edge_ids_file_order(loaded):
 
 
 def test_user_version(loaded):
-    assert loaded[1].execute("PRAGMA user_version").fetchone()[0] == 1
+    assert loaded[1].execute("PRAGMA user_version").fetchone()[0] == 2   # LATEST (spec: load ends at the latest migration)
 
 
 def test_foreign_keys_on(loaded):
