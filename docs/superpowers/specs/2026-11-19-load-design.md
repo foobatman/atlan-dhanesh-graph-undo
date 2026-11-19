@@ -1,6 +1,6 @@
 # `load` command: design
 
-**Status:** draft
+**Status:** approved
 **Brief:** `problem.md`, the `load seed.jsonl` command: "Create the database from the seed."
 
 ## Intent
