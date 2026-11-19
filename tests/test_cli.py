@@ -43,3 +43,14 @@ def test_entry_point(tmp_path):
                        capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
     assert (tmp_path / "seed.jsonl").read_text() == serialize(*generate_seed(42))
+
+
+def test_main_writes_ops(tmp_path, capsys):
+    from graph_undo.ops_fixture import generate_ops
+
+    assert main(["--seed", "42", "--out", str(tmp_path)]) == 0
+    nodes, edges = generate_seed(42)
+    ops, _ = generate_ops(42, nodes, edges)
+    assert (tmp_path / "seed.jsonl").read_text() == serialize(nodes, edges)
+    assert (tmp_path / "ops.jsonl").read_text() == serialize(ops, [])
+    assert "ops=" in capsys.readouterr().err

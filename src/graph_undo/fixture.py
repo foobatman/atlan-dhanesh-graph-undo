@@ -1,4 +1,4 @@
-"""Deterministic fixture generator: builds seed.jsonl from a seed value."""
+"""Deterministic fixture generator: builds seed.jsonl and ops.jsonl from a seed value."""
 
 from __future__ import annotations
 
@@ -144,10 +144,17 @@ def main(argv: list[str] | None = None) -> int:
     with open(path, "w", encoding="utf-8", newline="\n") as f:
         f.write(serialize(nodes, edges))
 
+    from graph_undo.ops_fixture import generate_ops  # local import: ops_fixture imports this module
+
+    ops, manifest = generate_ops(args.seed, nodes, edges)
+    with open(args.out / "ops.jsonl", "w", encoding="utf-8", newline="\n") as f:
+        f.write(serialize(ops, []))
+
     schemas = [n for n in nodes if n["type"] == "schema"]
     big = max(schemas, key=lambda s: sum(1 for n in nodes
                                          if n["qualified_name"].startswith(s["qualified_name"] + "/")))
     big_size = 1 + sum(1 for n in nodes if n["qualified_name"].startswith(big["qualified_name"] + "/"))
     print(f"wrote {path}: nodes={len(nodes)} edges={len(edges)} "
-          f"big_schema={big['qualified_name']} big_size={big_size}", file=sys.stderr)
+          f"big_schema={big['qualified_name']} big_size={big_size} "
+          f"ops={len(ops)} recreated={len(manifest['ingest_recreate'])}", file=sys.stderr)
     return 0

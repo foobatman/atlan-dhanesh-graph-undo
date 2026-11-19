@@ -1,6 +1,6 @@
 # Ops fixture generator — design
 
-Date: 2026-11-19 · Status: draft for approval · Source: `problem.md` ("Fixture", "Data model", "Cascade", "Actors", invariants)
+Date: 2026-11-19 · Status: approved (with add_node minting ids) · Source: `problem.md` ("Fixture", "Data model", "Cascade", "Actors", invariants)
 Builds on: `docs/superpowers/specs/2026-11-19-seed-data-design.md` (seed graph, `generate_seed`)
 
 ## Intent
@@ -58,14 +58,18 @@ Every line has `op_id`, `actor`, `op`, plus the op's own fields, and nothing els
 
 | op | actor | fields | semantics |
 |---|---|---|---|
-| `add_node` | human | `id`, `qualified_name`, `type`, `parent_id`, `description`, `owner`, `tags` | Creates the node and the `contains` edge `parent_id → id`. Invalid if `qualified_name` is live or `parent_id` isn't live. |
-| `add_node` | ingest | `id`, `qualified_name`, `type`, `parent_id` | **Upsert by `qualified_name`.** If a live node has that name: no-op (nothing changes, including authored fields and parent). Otherwise: create with this `id` and blank authored fields (`description: ""`, `owner: ""`, `tags: []`), plus the `contains` edge from `parent_id`. |
-| `edit_node` | human only | `node_id`, `set` | `set` is a non-empty subset of {`description`, `owner`, `tags`}. Replaces those fields. `tags` is stored sorted and duplicate-free. |
-| `delete_node` | human | `node_id` | Removes the node, every descendant along `contains`, and every edge (either type, either direction) touching any removed node. |
-| `add_edge` | human or ingest | `from_id`, `to_id`, `type` | Both endpoints live, `from_id ≠ to_id`, edge not already present. For `contains`: `to_id` must currently have no parent, the result must not create a cycle, and the type order `connection > database > schema > table > column` must hold. |
-| `delete_edge` | human | `from_id`, `to_id`, `type` | The edge must exist. Deleting a `contains` edge leaves the child temporarily parentless. The generator always follows it immediately with an `add_edge contains` for the same child (a move). |
+**Nodes are addressed by `qualified_name`, never by id.** `add_node` mints a new id at apply time (partner's decision), so `ops.jsonl` can't know the ids of nodes created by ops. A live qualified name identifies exactly one node, so every node reference in an op is a qualified name, resolved against the live graph when the op is applied.
 
-Why `add_node` carries `id` (our call): later human edits to recreated nodes must name those ids in `ops.jsonl`, which is written before the tool runs. So the generator chooses the id. Ingest uses it only when it actually mints. Ids come from the generator's seeded stream, so they never collide with seed ids.
+| op | actor | fields | semantics |
+|---|---|---|---|
+| `add_node` | human | `qualified_name`, `type`, `parent`, `description`, `owner`, `tags` | **Mints a new id.** Creates the node and the `contains` edge parent → new node. Invalid if `qualified_name` is live or `parent` isn't live. |
+| `add_node` | ingest | `qualified_name`, `type`, `parent` | **Upsert by `qualified_name`.** If a live node has that name: no-op (nothing changes, including authored fields and parent). Otherwise: **mint a new id** and create the node with blank authored fields (`description: ""`, `owner: ""`, `tags: []`), plus the `contains` edge from `parent`. |
+| `edit_node` | human only | `node`, `set` | `set` is a non-empty subset of {`description`, `owner`, `tags`}. Replaces those fields. `tags` is stored sorted and duplicate-free. |
+| `delete_node` | human | `node` | Removes the node, every descendant along `contains`, and every edge (either type, either direction) touching any removed node. |
+| `add_edge` | human or ingest | `from`, `to`, `type` | Both endpoints live, `from ≠ to`, edge not already present. For `contains`: `to` must currently have no parent, the result must not create a cycle, and the type order `connection > database > schema > table > column` must hold. |
+| `delete_edge` | human | `from`, `to`, `type` | The edge must exist. Deleting a `contains` edge leaves the child temporarily parentless. The generator always follows it immediately with an `add_edge contains` for the same child (a move). |
+
+`node`, `parent`, `from` and `to` are qualified names. How `apply` mints ids (e.g. `uuid4`, or deterministically from `op_id`) is for the apply spec. The fixture doesn't depend on it. Because names are resolved at apply time, an op naming a recreated R refers to the new node, which is what a human or crawler acting later would mean.
 
 `qualified_name` is identity, not a path. It is set at creation and never changes, including on a move. New nodes created by the generator use `parent's qualified_name + "/" + name`.
 
@@ -93,14 +97,14 @@ Phases run in this order. Filler (phase 8) is interleaved between phases 2–7 a
 | E1 | Human reference into a recreated table | human `add_edge` X → T′, where **X is a boundary table that had a removed reference X→T** and T′ is T's recreation | Undo's old X→T meets the human's new X→T′. Both survive, or merge, or the report explains. |
 | E2 | Re-point onto a recreated node | `delete_edge` X→Y, `add_edge` X→T′, again with X having had a removed X→T (a different X from E1) | Human intent about the boundary changed after the delete |
 | E3 | Human claims a deleted name | human `add_node` with a name in D that ingest did **not** recreate, under recreated R, with authored fields | The name is taken by human work, not ingest. Inv 1 + 3. |
-| E4 | Ingest re-touches the human-claimed name | ingest `add_node` with E3's name and a different id | Must be a no-op. Ingest never overwrites. |
+| E4 | Ingest re-touches the human-claimed name | ingest `add_node` with E3's name (no authored fields) | Must be a no-op. Ingest never overwrites. |
 | E5 | Endpoint gone | human `delete_node` of a boundary table B (not X of E1/E2, not edited in phase 2), which had a removed reference into D | That reference can't be restored: endpoint gone. Inv 4. |
 | E6 | Recreated node deleted again | human `delete_node` of a recreated table T′ that has recreated columns and no human edits | At undo time, T's name and its recreated columns' names are free again, while the name of T's parent (R) is held by recreated R′. |
 | E7 | Mixed name states under one parent | from phase 4: a recreated table T′ where some of T's original columns have their names recreated and some don't | Some originals collide on name, their siblings don't, and they share a parent name that is held by a new id |
 
 **What the fixture does not decide.** Invariant 2's "whose parent is live" can be read two ways: the original parent id, or whatever node holds the parent's name (or the parent restored earlier in the same undo, top-down). Which reading applies, and so which D nodes are *eligible* for restore, is an **undo rule** that goes in DECISIONS.md with the undo spec. The fixture only guarantees the raw states exist at the end of the ops, stated as facts the tests can check:
 
-- (a) D nodes whose name is free and whose whole ancestor chain of names is free up to R. That's most of D.
+- (a) D nodes whose name is free and whose ancestor names are free up to, but not including, R. That's most of D.
 - (b) D nodes whose name is held by a new id (recreated).
 - (c) D nodes whose name is free but whose parent's name is held by a new id (E7, and E6's columns after deletion).
 - (d) R's own name held by recreated R′, while R's original parent P is still live. |
@@ -109,7 +113,7 @@ Phases run in this order. Filler (phase 8) is interleaved between phases 2–7 a
 
 - `generate_ops(seed: int, nodes: list[dict], edges: list[dict]) -> tuple[list[dict], dict]`. It returns the ops and a **manifest**: `{case_name: [op_id, …]}` for every phase and edge case, used by tests and handy for reading the file. The manifest is not written to disk, because problem.md's fixture is only the two files.
 - Its own RNG: `random.Random(f"ops:{seed}")` (str seeding is deterministic), so tweaking ops generation never changes `seed.jsonl`.
-- A small in-memory **simulator** (`_Graph`: nodes by id, live name → id, parent map, children map, edge set) applies each op as it's emitted, using the semantics above. Each op is generated from the current simulated state, and the simulator rejects (raises on) any invalid op. That makes the generator's own tests the first validator of the contract.
+- A small in-memory **simulator** (`_Graph`: live nodes keyed by qualified name with a minted internal id, parent map, children map, edge set keyed by names) applies each op as it's emitted, using the semantics above. Each op is generated from the current simulated state, and the simulator rejects (raises on) any invalid op. That makes the generator's own tests the first validator of the contract.
 - R = largest schema by subtree size (same rule the seed tests use).
 - `main()` writes both files: `seed.jsonl` then `ops.jsonl`, same serialisation as the seed (`sort_keys`, compact separators, `\n`, trailing newline). The stderr summary gains `ops=<n> recreated=<k>`.
 
@@ -119,10 +123,10 @@ Phases run in this order. Filler (phase 8) is interleaved between phases 2–7 a
 2. `op_id`s are consecutive from `op-0001`. op-0001 is a human `delete_node` removing ≥ 500 nodes.
 3. Ops after op-0001 number 290–320.
 4. **Replay validity:** a test replays seed + all ops through an independent mini-applier written in the test file (not the generator's `_Graph`), and every op is valid.
-5. At the end: ≥ 50 distinct D names are live under ids not in the seed; ≥ 5 human `edit_node`s target such nodes.
+5. At the end: ≥ 50 distinct D names are live under ids not in the seed (the test applier mints its own ids); ≥ 5 human `edit_node`s target such nodes.
 6. Every manifest case has ≥ the minimum count above. E1–E7 each present. At end of replay, states (a)–(d) each have ≥ 1 node (computed by the independent test applier). E1/E2's X each had a seed reference to T (the original of T′).
 7. Every `delete_edge contains` is immediately followed by an `add_edge contains` for the same child.
-8. Re-point pairs: ≥ 10 adjacent `delete_edge` / `add_edge` references with the same `from_id` and a different `to_id`.
+8. Re-point pairs: ≥ 10 adjacent `delete_edge` / `add_edge` references with the same `from` and a different `to`.
 9. Determinism: identical bytes for the same seed, different for another seed. `seed.jsonl` bytes are unchanged by this work.
 
 ## Left to the builder
