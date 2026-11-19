@@ -135,7 +135,7 @@ stdout gets one line per invariant, then a final summary line:
 6 PASS  D3 == D4
 7 SKIP  not covered by this checker
 8 PASS  scenario 3.1 s (checker total 4.0 s)
-check op-0001: 6 passed, 0 failed, 1 skipped
+check op-0001: 7 passed, 0 failed, 1 skipped
 ```
 
 - A failing invariant prints `N FAIL <count> violations` followed by up to 10 indented violation lines. `--all` prints all of them.
