@@ -3,3 +3,5 @@ __pycache__/
 fixtures/
 .superpowers/
 .pytest_cache/
+*.db
+*.db.tmp

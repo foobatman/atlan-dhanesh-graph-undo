@@ -8,7 +8,8 @@ Undo for subtree deletes on a small SQLite-backed graph. The brief is in [proble
 |---|---|
 | Seed fixture generator (`seed.jsonl`) | done |
 | Ops fixture generator (`ops.jsonl`) | done |
-| `load` / `apply` / `undo` / `dump` | not started |
+| `load` (seed → SQLite) | done |
+| `apply` / `undo` / `dump` | not started |
 | Checker | not started |
 
 ## Setup
@@ -69,6 +70,27 @@ What seed 42's file contains, in order:
 
 Filler edits and edge changes are mixed in between. Full catalogue: `docs/superpowers/specs/2026-11-19-ops-fixture-design.md`.
 
+## Load the seed
+
+```sh
+uv run load fixtures/seed.jsonl              # (re)creates ./graph.db
+uv run load fixtures/seed.jsonl --db PATH    # or any other file
+```
+
+On success it prints `loaded graph.db: nodes=2503 edges=2801` to stderr and exits 0. A bad seed prints `<seed>:<line>: <message>` and exits 1; the database is built in `<db>.tmp` and swapped in only on success, so a failed load leaves any previous database untouched.
+
+Schema (`src/graph_undo/schema.sql`), flag-in-place: deleted rows stay with `deleted_by = <op_id>`; `NULL` means live.
+
+| object | what |
+|---|---|
+| `nodes` | `id`, `qualified_name`, `type`, `description`, `owner`, `tags` (sorted JSON array), `deleted_by` |
+| `edges` | `id` (row id), `from_id`, `to_id`, `type`, `deleted_by` |
+| unique indexes | among live rows only: `qualified_name`; `(from_id, to_id, type)`; one `contains` parent per node |
+| `live_nodes`, `live_edges` | views without deleted rows: read graph state through these |
+| `effective_tags` | view: `(node_id, tags)`, own tags ∪ every ancestor's along live `contains` |
+
+Full design: `docs/superpowers/specs/2026-11-19-load-design.md`.
+
 ## Run the tests
 
 ```sh
@@ -81,6 +103,9 @@ uv run pytest
 src/graph_undo/fixture/seed.py  seed generator
 src/graph_undo/fixture/ops.py   ops generator (name-keyed simulator validates every op)
 src/graph_undo/fixture/cli.py   gen-fixture CLI
+src/graph_undo/schema.sql       SQLite schema (tables, live views, effective_tags)
+src/graph_undo/store.py         connect + load_seed
+src/graph_undo/cli.py           load CLI
 tests/replay.py                independent replay of seed + ops, used by the tests
 tests/                         pytest suite
 docs/superpowers/specs/     design specs
