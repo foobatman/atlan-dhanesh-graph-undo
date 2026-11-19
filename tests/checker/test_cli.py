@@ -28,28 +28,47 @@ def test_format_results_summary_counts():
     assert out.endswith("check op-0007: 1 passed, 1 failed, 1 skipped\n")
 
 
-def test_main_bad_op_exit2(fixture42, capsys):
+def test_main_bad_op_exit2(fixture42, tmp_path, capsys):
     seed, ops = fixture42
-    assert cli.main(["--seed", str(seed), "--ops", str(ops), "--op", "op-9999"]) == 2
+    assert cli.main(["--seed", str(seed), "--ops", str(ops), "--op", "op-9999", "--workdir", str(tmp_path)]) == 2
     err = capsys.readouterr().err
     assert f"op 'op-9999' not found in {ops}" in err
 
 
 def test_main_missing_seed_exit2(fixture42, tmp_path, capsys):
     _, ops = fixture42
-    assert cli.main(["--seed", str(tmp_path / "nope.jsonl"), "--ops", str(ops)]) == 2
+    assert cli.main(["--seed", str(tmp_path / "nope.jsonl"), "--ops", str(ops), "--workdir", str(tmp_path)]) == 2
     assert "nope.jsonl" in capsys.readouterr().err
 
 
-def test_main_step_failure_keeps_workdir(fixture42, monkeypatch, capsys):
+def test_main_step_failure_keeps_workdir(fixture42, monkeypatch, tmp_path, capsys):
     seed, ops = fixture42
 
     def boom(art, op_id):
         raise RunError("run failed at step 8 (undo): boom")
 
     monkeypatch.setattr(run, "finish", boom)
-    assert cli.main(["--seed", str(seed), "--ops", str(ops)]) == 2
+    assert cli.main(["--seed", str(seed), "--ops", str(ops), "--workdir", str(tmp_path / "w")]) == 2
     err = capsys.readouterr().err
     assert "run failed at step 8 (undo): boom" in err
     kept = err.split("artifacts kept in ", 1)[1].strip()
     assert (Path(kept) / "D2.jsonl").exists()
+
+
+def test_default_workdir_is_out_check(fixture42, monkeypatch, tmp_path, capsys):
+    seed, ops = fixture42
+    monkeypatch.chdir(tmp_path)
+
+    def boom(art, op_id):
+        raise RunError("run failed at step 8 (undo): boom")
+
+    monkeypatch.setattr(run, "finish", boom)
+    assert cli.main(["--seed", str(seed), "--ops", str(ops)]) == 2
+    assert (tmp_path / "out" / "check" / "D2.jsonl").exists()
+    assert "artifacts kept in out/check" in capsys.readouterr().err
+
+
+def test_keep_flag_removed(capsys):
+    import pytest
+    with pytest.raises(SystemExit):
+        cli.main(["--keep"])

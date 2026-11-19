@@ -50,7 +50,7 @@
 
 ## The run
 
-The workdir is a fresh temp directory, or `--workdir DIR`. Let `T` be the target op's line in `ops.jsonl`, found by parsing each line's `op_id`.
+The workdir is `out/check/` (gitignored), or `--workdir DIR`. Each run first deletes the files it writes there, so a reused workdir never mixes two runs. Let `T` be the target op's line in `ops.jsonl`, found by parsing each line's `op_id`.
 
 | step | command | artifact |
 |---|---|---|
@@ -143,12 +143,12 @@ check op-0001: 7 passed, 0 failed, 1 skipped
   - 0: no `FAIL`;
   - 1: at least one `FAIL`;
   - 2: the run or the guard failed, or the input is bad (e.g. the op id isn't in `ops.jsonl`). The message goes to stderr.
-- The workdir and its artifacts (D0–D4, both reports, the ops slices) are kept when anything fails, or with `--keep`, and their path is printed. Otherwise the temp directory is removed.
+- The workdir and its artifacts (D0–D4, both reports, the ops slices) are always kept, and their path is printed. (Changed after implementation, at the user's request: it was a temp dir removed on success, and `--keep` is gone.)
 
 ## CLI
 
 ```
-uv run check [--seed fixtures/seed.jsonl] [--ops fixtures/ops.jsonl] [--op op-0001] [--workdir DIR] [--keep] [--all]
+uv run check [--seed fixtures/seed.jsonl] [--ops fixtures/ops.jsonl] [--op op-0001] [--workdir out/check] [--all]
 ```
 
 The checker does not generate the fixture. README already has `uv run gen-fixture`.
@@ -199,7 +199,6 @@ A separate top-level package that shares no code with `graph_undo`:
 
 - internal helper structure and the exact wording of violation lines;
 - whether `run.py` invokes `uv run <cmd>` or the venv's entry-point scripts directly (timing must cover the same commands either way);
-- temp directory handling details.
 
 ## Calls made by Claude (flag any to change)
 

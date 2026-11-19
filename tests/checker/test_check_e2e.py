@@ -13,9 +13,9 @@ from undo_checker.run import finish, prepare, slice_ops
 pytestmark = needs_undo
 
 
-def test_check_seed42(fixture42):
+def test_check_seed42(fixture42, tmp_path):
     seed, ops = fixture42
-    r = subprocess.run(["uv", "run", "check", "--seed", str(seed), "--ops", str(ops)],
+    r = subprocess.run(["uv", "run", "check", "--seed", str(seed), "--ops", str(ops), "--workdir", str(tmp_path)],
                        capture_output=True, encoding="utf-8")
     assert r.returncode == 0, r.stdout + r.stderr
     assert "7 SKIP" in r.stdout

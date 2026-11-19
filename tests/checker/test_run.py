@@ -79,3 +79,15 @@ def test_finish_seed42(fixture42, tmp_path):
     art = finish(prepare(seed, ops, slice_ops(ops, "op-0001"), tmp_path), "op-0001")
     assert art.d3 and art.d4 and art.report
     assert scenario_seconds(art) < 60
+
+
+def test_prepare_clears_stale_artifacts(fixture42, tmp_path):
+    seed, ops = fixture42
+    for name in ("D3.jsonl", "D4.jsonl", "report.jsonl", "report2.jsonl", "undo2.stderr", "graph.db"):
+        (tmp_path / name).write_text("stale", encoding="utf-8")
+    (tmp_path / "mine.txt").write_text("keep me", encoding="utf-8")
+    prepare(seed, ops, slice_ops(ops, "op-0001"), tmp_path)
+    for name in ("D3.jsonl", "D4.jsonl", "report.jsonl", "report2.jsonl", "undo2.stderr"):
+        assert not (tmp_path / name).exists(), name
+    assert (tmp_path / "graph.db").read_bytes() != b"stale"
+    assert (tmp_path / "mine.txt").read_text(encoding="utf-8") == "keep me"

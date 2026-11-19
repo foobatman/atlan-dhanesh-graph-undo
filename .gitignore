@@ -1,6 +1,7 @@
 .venv/
 __pycache__/
 fixtures/
+out/
 .superpowers/
 .pytest_cache/
 *.db

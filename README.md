@@ -21,10 +21,13 @@ The four commands from [problem.md](problem.md), run on the seed-42 fixture. Eac
 uv run gen-fixture                        # writes fixtures/seed.jsonl and fixtures/ops.jsonl
 uv run load fixtures/seed.jsonl           # load: create ./graph.db from the seed
 uv run apply fixtures/ops.jsonl           # apply: run all 309 ops in order (op-0001 deletes postgres/ops/core)
-uv run dump > before-undo.jsonl           # dump: the live graph as sorted JSONL
-uv run undo op-0001 > report.jsonl        # undo: reverse the big delete; JSONL report, one line per removed item
-uv run dump > after-undo.jsonl
+mkdir -p out                              # output artifacts go in out/ (gitignored)
+uv run dump > out/before-undo.jsonl       # dump: the live graph as sorted JSONL
+uv run undo op-0001 > out/report.jsonl    # undo: reverse the big delete; JSONL report, one line per removed item
+uv run dump > out/after-undo.jsonl
 uv run undo op-0001                       # a second undo is refused (already_undone, exit 1); the dump is unchanged
+uv run dump > out/after-second-undo.jsonl # byte-identical to out/after-undo.jsonl
+uv run check                              # the invariant checker; its artifacts go in out/check/
 ```
 
 Expected stderr:
@@ -37,11 +40,11 @@ undid op-0001 on graph.db: nodes restored=546 skipped=68; edges restored=584 mer
 op-0001 already_undone: already undone (undo #1, after op-0309); restored 546 nodes, 584 edges, merged 87, skipped 171. Undo runs once per op.
 ```
 
-`report.jsonl` has 1388 lines: one for each of the 614 nodes and 774 edges op-0001 removed. See [Undo a delete](#undo-a-delete) for the rules and the report format.
+`out/report.jsonl` has 1388 lines: one for each of the 614 nodes and 774 edges op-0001 removed. See [Undo a delete](#undo-a-delete) for the rules and the report format.
 
 `load`, `apply`, `dump` and `undo` take `--db PATH` to work on a file other than `./graph.db`.
 
-To check the invariants, run `uv run check` after `gen-fixture`. It runs load, apply, undo and dump itself in a temp dir, on its own database, so it never touches `./graph.db`. It prints one PASS/FAIL/SKIP line per invariant; see [Check](#check).
+To check the invariants, run `uv run check` after `gen-fixture`. It runs load, apply, undo and dump itself, on its own database in `out/check/`, so it never touches `./graph.db`. It prints one PASS/FAIL/SKIP line per invariant; see [Check](#check).
 
 ## Generate the fixture
 
@@ -181,7 +184,7 @@ Full design: `docs/superpowers/specs/2026-11-19-apply-foundation-design.md` and 
 
 ```sh
 uv run undo op-0001                   # undo against ./graph.db; JSONL report on stdout
-uv run undo op-0001 --db PATH > report.jsonl
+uv run undo op-0001 --db PATH > out/report.jsonl
 ```
 
 Only `delete_node` and `delete_edge` can be undone, and each op **at most once**. The whole undo is one transaction. Rule B2 decides each removed item, parents before children:
@@ -234,7 +237,7 @@ Prints the **live** graph as JSONL on stdout, using the same compact, sorted-key
 ```sh
 uv run check                                   # fixtures/seed.jsonl + fixtures/ops.jsonl, undoes op-0001
 uv run check --seed S --ops O --op op-0001     # any delete_node op in O
-uv run check --workdir DIR --keep --all        # keep artifacts in DIR; print every violation
+uv run check --workdir DIR --all              # artifacts in DIR instead of out/check; print every violation
 ```
 
 An independent witness for undo. It runs the tool as a black box through its CLI commands, and reads only what they print: dumps, the undo report and the fixture files. **It never opens the db, and it imports nothing from `graph_undo`** (`tests/test_layers.py` enforces both). Each command runs as `uv run <cmd> … --db <workdir>/graph.db`:
@@ -282,7 +285,7 @@ check op-0001: 7 passed, 0 failed, 1 skipped
 - 1: at least one invariant fails (up to 10 violations each are shown; `--all` shows all of them);
 - 2: the run, the guard or the input failed (an unknown op, a target op that isn't a `delete_node`, a command that failed at some step), with the message on stderr.
 
-The workdir is a temp dir, removed on success. It is kept, and its path printed, on any failure, with `--keep`, or when `--workdir` is given. Full design: `docs/superpowers/specs/2026-11-19-checker-design.md`.
+The workdir is `out/check/` by default (`out/` is gitignored), or `--workdir DIR`. It is always kept, and its path is printed. Each run first deletes the files a run writes there (`graph.db`, the ops slices, D0–D4 and both reports), so a reused workdir never mixes two runs. Other files in it are left alone. Full design: `docs/superpowers/specs/2026-11-19-checker-design.md`.
 
 ## Known limitation: undo of undo is not supported
 

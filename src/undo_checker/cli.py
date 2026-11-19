@@ -7,9 +7,7 @@ Exit 0: nothing failed. 1: an invariant failed. 2: the run, the guard or the inp
 from __future__ import annotations
 
 import argparse
-import shutil
 import sys
-import tempfile
 import time
 from pathlib import Path
 
@@ -18,6 +16,7 @@ from . import run
 from .model import ModelError, parse_dump, parse_report, removed
 
 MAX_SHOWN = 10
+DEFAULT_WORKDIR = Path("out/check")
 
 
 def format_results(results: list[tuple[int, inv.Result]], op_id: str, show_all: bool) -> str:
@@ -64,14 +63,13 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--seed", type=Path, default=Path("fixtures/seed.jsonl"))
     ap.add_argument("--ops", type=Path, default=Path("fixtures/ops.jsonl"))
     ap.add_argument("--op", default="op-0001", help="the delete_node op to undo and check")
-    ap.add_argument("--workdir", type=Path, help="keep all artifacts here (default: a temp dir)")
-    ap.add_argument("--keep", action="store_true", help="keep the temp workdir even on success")
+    ap.add_argument("--workdir", type=Path, default=DEFAULT_WORKDIR,
+                    help="where the run's db, dumps and reports go (default: out/check; cleared per run)")
     ap.add_argument("--all", action="store_true", help="print every violation, not just the first 10")
     args = ap.parse_args(argv)
 
     t0 = time.perf_counter()
-    workdir = args.workdir or Path(tempfile.mkdtemp(prefix="undo-check-"))
-    keep = args.keep or args.workdir is not None
+    workdir = args.workdir
     try:
         results = _check(args.seed, args.ops, args.op, workdir, t0)
     except (run.RunError, ModelError) as e:
@@ -80,8 +78,5 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     sys.stdout.write(format_results(results, args.op, args.all))
     failed = any(r.status == "FAIL" for _, r in results)
-    if failed or keep:
-        print(f"artifacts kept in {workdir}", file=sys.stderr)
-    else:
-        shutil.rmtree(workdir, ignore_errors=True)
+    print(f"artifacts kept in {workdir}", file=sys.stderr)
     return 1 if failed else 0

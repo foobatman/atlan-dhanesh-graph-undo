@@ -13,6 +13,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 TIMED_STEPS = (1, 2, 4, 6, 8, 9)
+# Files a run writes; cleared at the start so a reused workdir never mixes two runs.
+ARTIFACTS = ("graph.db", "graph.db-journal", "ops_pre.jsonl", "ops_target.jsonl", "D0.jsonl", "D1.jsonl",
+             "D2.jsonl", "report.jsonl", "D3.jsonl", "report2.jsonl", "undo2.stderr", "D4.jsonl")
 REJECTED = re.compile(r"rejected=(\d+)")
 
 
@@ -98,6 +101,8 @@ def prepare(seed: Path, ops: Path, target: Target, workdir: Path) -> Artifacts:
     """Steps 1-7: load, apply up to the target, dump D0, apply it, dump D1, apply all, dump D2."""
     workdir = Path(workdir)
     workdir.mkdir(parents=True, exist_ok=True)
+    for name in ARTIFACTS:
+        (workdir / name).unlink(missing_ok=True)
     art = Artifacts(workdir)
     pre = workdir / "ops_pre.jsonl"
     tgt = workdir / "ops_target.jsonl"
