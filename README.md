@@ -11,7 +11,7 @@ Undo for subtree deletes on a small SQLite-backed graph. The brief is in [proble
 | `load` (seed → SQLite) | done |
 | `migrate` (schema migrations) | done |
 | `apply` foundation (parse, errors, op log, registry, CLI) | done |
-| `apply` op handlers (`add_node`, `edit_node`, `delete_node`, `add_edge`, `delete_edge`) | pending (stubs) |
+| `apply` op handlers (`add_node`, `edit_node`, `delete_node`, `add_edge`, `delete_edge`) | done |
 | `undo` / `dump` | not started |
 | Checker | not started |
 
@@ -116,7 +116,7 @@ Each op is parsed (`parse_op`: shape only), then applied in **its own transactio
 
 ```
 fixtures/ops.jsonl:17: op-0017 node_not_found: node 'conn/db/x' is not a live node
-applied fixtures/ops.jsonl to graph.db: applied=303 noop=6 skipped=0 rejected=0
+applied fixtures/ops.jsonl to graph.db: applied=302 noop=7 skipped=0 rejected=0
 ```
 
 - Everything after `<line>: ` is exactly `str(OpError)` (`<op_id> <code>: <message>`, or `<code>: <message>` when the line has no usable `op_id`), the same text any caller of the API gets for that op. Line numbers count `\n` only; blank lines are ignored.
@@ -125,7 +125,17 @@ applied fixtures/ops.jsonl to graph.db: applied=303 noop=6 skipped=0 rejected=0
 - **Re-runs:** an `op_id` already in `ops` with the same payload is `skipped`; with a different payload it is rejected as `op_id_conflict`. Rejected ops are never logged, so a re-run tries them again.
 - New node ids are `uuid5(6f1c3a52-0d8e-4c1e-9b7a-2f4d5e6a7b8c, op_id)`, so the same seed and ops give the same db, ids included.
 
-**Status:** the foundation (parsing, errors, op log, registry, `apply_file`, CLI) is done. The five op handlers in `src/graph_undo/api/<op>.py` are still stubs (`STUB = True`, raising `NotImplementedError`), so applying the real fixture fails on its first op until they land.
+**Seed 42:** `uv run load fixtures/seed.jsonl && uv run apply fixtures/ops.jsonl` applies all 309 ops in about 0.2 s. The 7 no-ops are ingest `add_node`s on names that were already live. op-0001 removes 614 nodes and 774 edges. A second run reports `skipped=309` and changes nothing. The live result matches an independent replay (`tests/test_apply_e2e.py`).
+
+What each op records:
+
+| op | graph writes | `ops` row | removals |
+|---|---|---|---|
+| `add_node` | a new node (id from `op_id`) and its `contains` edge, or nothing if ingest finds the name live (`noop`) | `node_id`, `edge_id` = the new `contains` edge | none |
+| `edit_node` | replaces the fields in `set`. An edit that changes nothing still counts as `applied`. | `node_id`, `before` = previous values of the fields set | none |
+| `delete_node` | `deleted_by = op_id` on the node, its live subtree, and every live edge touching them | `node_id` = the root | one `removed_nodes` / `removed_edges` row per flagged row |
+| `add_edge` | a new edge row (a dead identical edge is never revived) | `edge_id` | none |
+| `delete_edge` | `deleted_by = op_id` on that one live edge | `edge_id` | one `removed_edges` row |
 
 | code | raised when |
 |---|---|
