@@ -60,8 +60,11 @@ src/graph_undo/
     ops.py                typed op dataclasses + parse_op(dict) -> Op
     errors.py             OpError hierarchy (below)
   db/                     the only package that contains SQL
-    schema.sql            (moved from src/graph_undo/schema.sql, extended with ops + removals)
-    connection.py         connect(path); init_schema(con); transaction(con) context manager
+    migrations/           numbered SQL migrations, never edited once committed
+      0001_graph.sql      nodes, edges, partial indexes, live views, effective_tags (today's schema.sql, minus the PRAGMA)
+      0002_oplog.sql      ops, removals
+    migrate.py            in-house runner: migrate(con, source=None) -> list[int]; pending(con, source=None) -> list[int]; LATEST
+    connection.py         connect(path); transaction(con) context manager
     nodes.py              NodeRepo
     edges.py              EdgeRepo
     oplog.py              OpLogRepo (ops + removals tables)
@@ -79,6 +82,7 @@ src/graph_undo/
   cli/
     load.py               load_main   (moved from cli.py)
     apply.py              apply_main
+    migrate.py            migrate_main: `uv run migrate [--db graph.db]`
   fixture/                unchanged
 ```
 
@@ -176,7 +180,7 @@ Error handling across the layers:
 7. **`update_fields(node_id, fields)`** takes domain values (`tags` as a tuple, encoded by the repo). It raises `ValueError` on keys outside description/owner/tags; that is a programming error, not an `OpError`.
 8. **Per-op tests that need another op's handler** use `pytest.skip` until that handler is in `HANDLERS`. All other setup goes directly through the repositories, so the per-op plans can land in any order.
 
-## Database additions (`db/schema.sql`, `user_version = 2`)
+## Database additions (migration `0002_oplog.sql`)
 
 ```sql
 CREATE TABLE ops (
@@ -202,7 +206,34 @@ CREATE TABLE removals (
 
 - **Who writes `removals`:** only `delete_node` and `delete_edge` write rows. Every row they add has a matching `deleted_by = op_id` on the node or edge, set in the same transaction.
 - **Ids are names resolved at apply time.** The log stores ids, never names, because a name can point to different nodes over time.
-- **Migration:** `init_schema` creates the full v2 schema, and `load` creates v2 directly. `apply` refuses a database whose `user_version` isn't 2 with exit 1 and "run load first".
+- **Migrations:** these tables arrive in migration `0002`. See "Schema migrations" below.
+
+## Schema migrations (in-house runner, stdlib only)
+
+**The user's decision:** a small runner of our own, option C. It has no dependency and keeps the stdlib-only rule. yoyo-migrations and Alembic were considered and rejected.
+
+- **Files.** Migrations are `src/graph_undo/db/migrations/NNNN_<name>.sql`, with a 4-digit, gap-free, ascending number. A committed migration is never edited; any change to the schema is a new file. They are read with `importlib.resources`, so they ship in the wheel.
+- **Version.** SQLite's `PRAGMA user_version` holds the number of the last migration applied. A fresh file has `0`. `LATEST` is the highest file number. The migration files never set `user_version` themselves; the runner sets it.
+- **`migrate(con, source: Traversable | None = None) -> list[int]`** (`source` defaults to the packaged `migrations/` folder; tests pass a temp dir) applies each pending migration in order, each in its own transaction, as one `executescript`:
+
+  ```
+  BEGIN IMMEDIATE;
+  <file contents>;
+  PRAGMA user_version = N;
+  COMMIT;
+  ```
+
+  The connection runs with `isolation_level=None`, so that script is the whole transaction. On error, the runner issues `ROLLBACK` and raises `MigrationError(N, message)`. `user_version` is transactional, so a failed migration leaves the version at `N-1` and the schema unchanged. It returns the numbers applied.
+- **Guards.**
+  - A database with `user_version > LATEST` makes `migrate` raise `MigrationError` ("database is newer than this code").
+  - Files with a gap or a duplicate number make the runner raise at import time.
+- **`pending(con) -> list[int]`** returns the migration numbers that are not yet applied.
+- **Who runs it.**
+  - `load` builds the tmp db by running `migrate()` from 0 up to `LATEST`, then bulk-inserts the seed.
+  - `apply` checks `pending()`. If any are pending, it exits 1 with `database needs migrations [N…]; run: uv run migrate --db <db>`, and no op is attempted.
+  - `uv run migrate --db graph.db` applies the pending migrations and prints `migrated graph.db: 1 -> 2`, or `graph.db is up to date (2)`.
+  - The commands never migrate implicitly, so a schema change always happens on purpose.
+- **The load spec changes in two ways:** `schema.sql` becomes `0001_graph.sql` without the `PRAGMA user_version = 1` line, and `load`'s database ends at `user_version = LATEST`, which is 2 now.
 
 ## Repositories (`db/`)
 
@@ -296,7 +327,7 @@ def apply_op(store: Store, op: Op) -> OpResult:
 - **Each rejection:** printed to stderr as it happens, as `ops.jsonl:<line>: <op_id> <code>: <message>`. Everything after `<line>: ` is exactly `str(OpError)`, the same text any caller of the API layer gets for that op. A future single-op CLI would print `<op_id> <code>: <message>` with no location prefix.
 - **Summary:** always printed at the end, as `applied ops.jsonl to graph.db: applied=303 noop=6 skipped=0 rejected=0`.
 - **Exit code:** 0 whenever the file was processed, **even if some ops were rejected**. Rejected ops are only logged to stderr and counted in the summary. This is the user's decision: "don't exit apply with non-zero status unless the entire apply fails."
-- **Exit 1 only when the apply as a whole cannot run:** the ops file is missing or unreadable, the db is missing, or the db has the wrong `user_version`. A plain message is printed, and no op is attempted.
+- **Exit 1 only when the apply as a whole cannot run:** the ops file is missing or unreadable, the db is missing, the db has pending migrations, or it is newer than the code (`MigrationError`). A plain message is printed, and no op is attempted.
 
 ## Testing approach (shared)
 
@@ -320,7 +351,7 @@ def apply_op(store: Store, op: Op) -> OpResult:
 - The foundation plan (`docs/superpowers/plans/2026-11-19-apply-foundation.md`) builds:
   - the package move;
   - domain types, errors and `parse_op`;
-  - the db repositories and schema v2;
+  - the migration runner, migrations `0001` and `0002`, `uv run migrate`, and the db repositories;
   - the registry, `apply_file` and the CLI;
   - the layer test.
 - It registers handlers as they land. The per-op plans (`2026-11-19-op-<name>.md`) each add one handler and its tests, and can run in any order after the foundation.

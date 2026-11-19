@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** The layered package (`domain` / `db` / `api` / `cli`), schema v2 (`ops`, `removals`), typed op parsing and errors, the handler registry, and `uv run apply`. Per-op handlers then plug in.
+**Goal:** The layered package (`domain` / `db` / `api` / `cli`), an in-house migration runner with migrations `0001` (graph) and `0002` (`ops`, `removals`), typed op parsing and errors, the handler registry, and `uv run apply`. Per-op handlers then plug in.
 
 **Architecture:**
 - The dependency direction is `cli → api → db → domain`, and `api` also imports `domain`.
@@ -20,10 +20,10 @@
 - **Commands:** every command runs as `uv run …`.
 - **Git:** commit directly on `main`.
 - **README:** updated in the task that changes the CLI or layout.
-- **Schema version:** `user_version = 2`. `apply` refuses any other version with exit 1 and "run load first".
+- **Schema version:** `PRAGMA user_version` is the last migration applied, and only the runner sets it. `apply` exits 1 if migrations are pending (`run: uv run migrate --db <db>`) or if the db is newer than the code.
 - **Ids:** `mint_node_id(op_id) = str(uuid.uuid5(UUID("6f1c3a52-0d8e-4c1e-9b7a-2f4d5e6a7b8c"), op_id))`.
 - **Error text:** `str(OpError) == f"{op_id} {code}: {message}"`. `apply` prints it as `<ops path>:<line>: <str(e)>`.
-- **Summary line:** `applied <ops> to <db>: applied=N noop=N skipped=N rejected=N`. The exit code is 0 whenever the file was processed, rejected ops included. It is 1 only when apply can't run at all (missing or unreadable ops file, missing db, wrong `user_version`).
+- **Summary line:** `applied <ops> to <db>: applied=N noop=N skipped=N rejected=N`. The exit code is 0 whenever the file was processed, rejected ops included. It is 1 only when apply can't run at all (missing or unreadable ops file, missing db, pending migrations or a db newer than the code).
 - **Moved load code:** existing load behaviour and tests are unchanged except for import paths.
 
 ## Review Focus
@@ -40,7 +40,7 @@
 
 **Files:**
 - Create the packages `domain/`, `db/`, `api/` and `cli/`, each with an `__init__.py`.
-- Move `schema.sql` to `db/schema.sql`.
+- Move `schema.sql` to `db/migrations/0001_graph.sql`, dropping its `PRAGMA user_version` line. Create `db/migrate.py` and `cli/migrate.py`.
 - Split `store.py` into `db/connection.py`, `db/store.py` (bulk load) and `api/load.py`.
 - Move `cli.py` to `cli/load.py`.
 - Modify `pyproject.toml` (`load = "graph_undo.cli.load:main"`), `tests/test_load*.py` (imports only) and `README.md` (layout).
@@ -48,7 +48,8 @@
 
 **Interfaces produced:**
 - `db.connection.connect(path)`.
-- `db.connection.init_schema(con)`.
+- `db.migrate.migrate(con) -> list[int]`, `db.migrate.pending(con) -> list[int]`, `db.migrate.LATEST` and `db.migrate.MigrationError(number, message)`.
+- `cli.migrate.main(argv=None) -> int`, registered in `pyproject` as `migrate = "graph_undo.cli.migrate:main"`.
 - `db.connection.transaction(con)`, a context manager that runs `BEGIN IMMEDIATE`, then `COMMIT`, or `ROLLBACK` on an exception. Set `isolation_level=None` in `connect` so that transactions are explicit.
 - `api.load.load_seed(seed_path, db_path) -> (int, int)` and `api.load.LoadError`.
 - `cli.load.main(argv=None) -> int`.
@@ -63,10 +64,18 @@
   - `fixture` is exempt and must not be imported by the other four packages.
   - Assert that `import sqlite3` appears only in `db/`.
   - Assert that no string literal outside `db/` matches `\b(SELECT|INSERT|UPDATE|DELETE FROM|CREATE)\b`.
-- [ ] **Step 2: Run** `uv run pytest tests/test_layers.py -q`. Expected: FAIL, because the packages are missing.
+- [ ] **Step 1b: Write `tests/test_migrate.py`.** Each test points the runner at a temporary migrations directory by passing `migrate(con, source=path)`; production code uses the packaged folder.
+  - `test_fresh_db_runs_all`: version goes 0 → `LATEST`, and the tables exist.
+  - `test_idempotent`: a second `migrate` returns `[]`.
+  - `test_pending`: `pending()` is `[2]` after only `0001` was applied.
+  - `test_failed_migration_rolls_back`: a broken `0002` raises `MigrationError(2, …)`. Afterwards the version is 1 and no partial table exists.
+  - `test_newer_db_refused`: `user_version = 99` raises `MigrationError`.
+  - `test_gap_or_duplicate_rejected`: files `0001`, `0003`, or two `0002` files, raise `MigrationError`.
+  - `test_migrate_cli`: prints `migrated g.db: 1 -> 2`, then `g.db is up to date (2)` on a second run; exit 0 both times.
+- [ ] **Step 2: Run** `uv run pytest tests/test_layers.py tests/test_migrate.py -q`. Expected: FAIL, because the packages are missing.
 - [ ] **Step 3: Do the move.** Update the test imports (`from graph_undo.api.load import LoadError, load_seed`, `from graph_undo.db.connection import connect`, `from graph_undo.cli.load import main as load_main`). Run `uv sync`.
 - [ ] **Step 4: Run** `uv run pytest -q`. Expected: all pass, and `uv run load fixtures/seed.jsonl` still prints `nodes=2503 edges=2801`.
-- [ ] **Step 5: Commit** `refactor: layered package (domain/db/api/cli); load moved, behaviour unchanged`.
+- [ ] **Step 5: Commit** `refactor: layered package (domain/db/api/cli), in-house migrations; load behaviour unchanged`. In the same commit, update the README: the `uv run migrate` command and the layout.
 
 ### Task 2: Domain types, errors and `parse_op`
 
@@ -105,9 +114,9 @@
 - [ ] **Step 4: Run** → PASS.
 - [ ] **Step 5: Commit** `feat: domain ops, errors and parse_op`.
 
-### Task 3: Schema v2 and repositories
+### Task 3: Migration `0002` and repositories
 
-**Files:** Modify `db/schema.sql` (add `ops` and `removals`, set `user_version = 2`). Create `db/nodes.py`, `db/edges.py` and `db/oplog.py`, and extend `db/store.py` with `Store(con)` and `mint_node_id`. Test: `tests/apply/test_repos.py`.
+**Files:** Create `db/migrations/0002_oplog.sql` (`ops`, `removals`). Create `db/nodes.py`, `db/edges.py` and `db/oplog.py`, and extend `db/store.py` with `Store(con)` and `mint_node_id`. Test: `tests/apply/test_repos.py`.
 
 **Interfaces produced** are the method lists in the spec's "Repositories" section, plus any additions the per-op specs request under "Foundation changes requested". Also `LoggedOp`, a dataclass mirroring the `ops` columns except `seq`.
 
@@ -122,11 +131,12 @@
   - `add_removals` and `removals` round-trip.
   - Recording an `op_id` twice raises `sqlite3.IntegrityError`.
   - `mint_node_id("op-0001")` is stable and equals the uuid5 above.
-  - `load` produces `user_version` 2 and an empty `ops` table.
+  - `load` produces `user_version == LATEST == 2` and an empty `ops` table.
+  - A db loaded at version 1 (built by running only `0001`) migrates to 2 via `uv run migrate`, keeping all its graph rows.
 - [ ] **Step 2: Run** → FAIL.
 - [ ] **Step 3: Implement** the code. `live_subtree_ids` is a recursive CTE over `live_edges`, so it is one query. Every repository method is set-based; no per-row loops over a subtree.
 - [ ] **Step 4: Run** → PASS, and the full suite is green.
-- [ ] **Step 5: Commit** `feat: schema v2 (ops, removals) and repositories`.
+- [ ] **Step 5: Commit** `feat: migration 0002 (ops, removals) and repositories`.
 
 ### Task 4: Registry, `apply_file` and `uv run apply`
 
@@ -154,7 +164,7 @@
   - CLI tests:
     - the summary line format;
     - exit 0 with rejected ops (`rejected=2`, each rejection on stderr);
-    - exit 1 for a missing ops file, a missing db and `user_version` 1, with no op attempted;
+    - exit 1 for a missing ops file, a missing db and a db with pending migrations (message names `uv run migrate`), with no op attempted;
     - the stderr reject line equals `f"{path}:{line}: {e}"`;
     - `uv run apply` works through its entry point.
 - [ ] **Step 2: Run** → FAIL.
