@@ -128,8 +128,8 @@ def generate_ops(seed: int, nodes: list[dict], edges: list[dict]) -> tuple[list[
     ops: list[dict] = []
     manifest: dict[str, list[str]] = defaultdict(list)
 
-    def emit(case: str, kind: str, op: str, **fields) -> None:
-        name = INGEST if kind == "ingest" else rng.choice(OWNERS)
+    def emit(case: str, kind: str, op: str, actor: str | None = None, **fields) -> None:
+        name = INGEST if kind == "ingest" else (actor or rng.choice(OWNERS))
         rec = {"op_id": f"op-{len(ops) + 1:04d}", "actor": {"kind": kind, "name": name}, "op": op, **fields}
         g.apply(rec)
         ops.append(rec)
@@ -173,6 +173,12 @@ def generate_ops(seed: int, nodes: list[dict], edges: list[dict]) -> tuple[list[
     # ---- phase 1: big delete -------------------------------------------------------------
     emit("big_delete", "human", "delete_node", node=root)
 
+    def pair(case: str, type_: str, old: tuple[str, str], new: tuple[str, str]) -> None:
+        """Re-point or move: delete_edge then add_edge, two ops by the same human."""
+        who = rng.choice(OWNERS)
+        emit(case, "human", "delete_edge", actor=who, **{"from": old[0], "to": old[1], "type": type_})
+        emit(case, "human", "add_edge", actor=who, **{"from": new[0], "to": new[1], "type": type_})
+
     def filler(n: int) -> None:
         protected = reserved | {parent_db}
         while n > 0:
@@ -202,8 +208,7 @@ def generate_ops(seed: int, nodes: list[dict], edges: list[dict]) -> tuple[list[
                 f, t = rng.choice(seed_refs)
                 z = rng.choice(tables)
                 if z not in (f, t) and not g.has_ref(f, z):
-                    emit("filler", "human", "delete_edge", **{"from": f, "to": t, "type": "references"})
-                    emit("filler", "human", "add_edge", **{"from": f, "to": z, "type": "references"})
+                    pair("filler", "references", (f, t), (f, z))
                     n -= 2
 
     def gap() -> None:
@@ -238,13 +243,11 @@ def generate_ops(seed: int, nodes: list[dict], edges: list[dict]) -> tuple[list[
         z = rng.choice(live_tables(exclude=reserved | {x, y}))
         if g.has_ref(x, z):
             continue
-        emit("repoints", "human", "delete_edge", **{"from": x, "to": y, "type": "references"})
-        emit("repoints", "human", "add_edge", **{"from": x, "to": z, "type": "references"})
+        pair("repoints", "references", (x, y), (x, z))
         pairs += 1
     s1, s2 = g.children[parent_db][:2]
     for t in [t for t in g.children[s1] if t not in reserved][:2]:
-        emit("moves", "human", "delete_edge", **{"from": s1, "to": t, "type": "contains"})
-        emit("moves", "human", "add_edge", **{"from": s2, "to": t, "type": "contains"})
+        pair("moves", "contains", (s1, t), (s2, t))
     gap()
 
     # ---- phase 4: ingest run ---------------------------------------------------------------
@@ -297,8 +300,7 @@ def generate_ops(seed: int, nodes: list[dict], edges: list[dict]) -> tuple[list[
         y = next(t for t in live_tables(exclude=reserved) if t != x2 and not g.has_ref(x2, t))
         emit("E2", "human", "add_edge", **{"from": x2, "to": y, "type": "references"})
         outs = [y]
-    emit("E2", "human", "delete_edge", **{"from": x2, "to": outs[0], "type": "references"})
-    emit("E2", "human", "add_edge", **{"from": x2, "to": t2, "type": "references"})
+    pair("E2", "references", (x2, outs[0]), (x2, t2))
     claimed = next(t for t in d_tables if t not in g.nodes)
     emit("E3", "human", "add_node", qualified_name=claimed, type="table", parent=root,
          description=f"table {claimed.rsplit('/', 1)[-1]} (created by hand)",

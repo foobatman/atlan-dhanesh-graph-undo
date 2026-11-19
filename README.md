@@ -29,7 +29,7 @@ uv run gen-fixture --seed 7 --out DIR     # writes DIR/seed.jsonl and DIR/ops.js
 The same seed always produces a byte-identical file. A summary line goes to stderr:
 
 ```
-wrote fixtures/seed.jsonl: nodes=2503 edges=2801 big_schema=postgres/ops/core big_size=614 ops=307 recreated=71
+wrote fixtures/seed.jsonl: nodes=2503 edges=2801 big_schema=postgres/ops/core big_size=614 ops=309 recreated=77
 ```
 
 `seed.jsonl` holds one JSON object per line: all nodes, then all edges. A line with `from_id` is an edge.
@@ -58,7 +58,7 @@ What seed 42's file contains, in order:
 1. op-0001 deletes the big schema (614 nodes).
 2. Human edits to its neighbours, including a new tag on the parent database.
 3. 10 re-pointed references and 2 table moves.
-4. An ingest run recreating 71 deleted names under new ids.
+4. An ingest run recreating 77 deleted names under new ids.
 5. 9 human edits to recreated nodes.
 6. Edge cases:
    - a reference to a recreated table;

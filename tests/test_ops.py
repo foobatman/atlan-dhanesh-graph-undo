@@ -134,3 +134,16 @@ def test_ops_deterministic():
     assert generate_ops(42, n, e) == generate_ops(42, n, e)
     n2, e2 = generate_seed(43)
     assert generate_ops(42, n, e)[0] != generate_ops(43, n2, e2)[0]
+
+
+def test_pairs_share_actor(case):
+    ops = case[2]
+    pairs = 0
+    for a, b in zip(ops, ops[1:]):
+        if a["op"] != "delete_edge" or b["op"] != "add_edge" or a["type"] != b["type"]:
+            continue
+        same = a["from"] == b["from"] if a["type"] == "references" else a["to"] == b["to"]
+        if same:
+            pairs += 1
+            assert a["actor"] == b["actor"], (a["op_id"], b["op_id"])
+    assert pairs >= 12  # >= 10 re-points + >= 2 moves
