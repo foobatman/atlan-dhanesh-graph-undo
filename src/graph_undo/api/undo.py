@@ -7,8 +7,11 @@ Then, in one transaction: bulk-read the inputs, plan with domain.undo.plan_undo,
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
+from pathlib import Path
 
+from graph_undo.api.apply import open_store
 from graph_undo.db.connection import transaction
 from graph_undo.db.store import Store
 from graph_undo.db.undolog import UndoItem
@@ -24,6 +27,14 @@ class UndoResult:
     op_id: str
     lines: list[str]            # the JSONL report, one line per removed node/edge
     counts: dict[str, int]      # restored_nodes, restored_edges, merged, skipped
+
+    def summary(self) -> dict[str, dict[str, int]]:
+        """Outcome counts per kind: {"node": {"restored": .., "skipped": ..}, "edge": {..., "merged": ..}}."""
+        out = {"node": {"restored": 0, "skipped": 0}, "edge": {"restored": 0, "merged": 0, "skipped": 0}}
+        for line in self.lines:
+            o = json.loads(line)
+            out[o["kind"]][o["outcome"]] += 1
+        return out
 
 
 def _check(store: Store, op_id: str) -> str:
@@ -87,3 +98,12 @@ def undo_op(store: Store, op_id: str) -> UndoResult:
         lines = _write(store, plan_undo(_inputs(store, op_id, op)))
         counts = store.undo_log.counts(op_id)
     return UndoResult(op_id, lines, counts)
+
+
+def undo_db(db_path: str | Path, op_id: str) -> UndoResult:
+    """Open db_path (ApplyError if missing, unreadable or not migrated), undo op_id, close."""
+    store = open_store(Path(db_path))
+    try:
+        return undo_op(store, op_id)
+    finally:
+        store.close()

@@ -12,7 +12,8 @@ Undo for subtree deletes on a small SQLite-backed graph. The brief is in [proble
 | `migrate` (schema migrations) | done |
 | `apply` foundation (parse, errors, op log, registry, CLI) | done |
 | `apply` op handlers (`add_node`, `edit_node`, `delete_node`, `add_edge`, `delete_edge`) | done |
-| `undo` / `dump` | not started |
+| `undo` (rule B2, once per op, JSONL report) | done |
+| `dump` | not started |
 | Checker | not started |
 
 ## Setup
@@ -157,6 +158,38 @@ What each op records:
 
 Full design: `docs/superpowers/specs/2026-11-19-apply-foundation-design.md` and the per-op specs `2026-11-19-op-*-design.md`.
 
+## Undo a delete
+
+```sh
+uv run undo op-0001                   # undo against ./graph.db; JSONL report on stdout
+uv run undo op-0001 --db PATH > report.jsonl
+```
+
+Only `delete_node` and `delete_edge` can be undone, and each op **at most once**. The whole undo is one transaction. Rule B2 decides each removed item, parents before children:
+
+- **Node:** `restored` if its name is free, under its original parent if that is live (or restored by this undo), otherwise under the live node that now holds the parent's name, if it has the parent's type. Otherwise `skipped`, with `name_held`, `parent_type_mismatch` or `no_live_parent`. A restored node keeps its id and its fields from delete time. Live nodes are never edited.
+- **Edge:** a `contains` edge into a node restored under a different parent is `merged`: a new edge is created from that parent, and `new_edge_id` says which. Any other edge is `restored` if both of its original endpoints are live. Otherwise it is `skipped`, with `endpoint_not_restored`, `endpoint_deleted`, `duplicate_edge` or `child_has_parent`. References are never redirected.
+
+**Report:** one JSON object per line for every node and edge the op removed, nothing else. Node lines come first (by `qualified_name`, `id`), then edge lines (by `id`). The fields are:
+- `kind`, `id`, `op_id`, `outcome`;
+- for nodes, `qualified_name`, plus `parent_id` when restored;
+- for edges, `from_id`, `to_id`, `type`, plus `new_edge_id` when merged;
+- `reason_code` and `reason` on every merged or skipped item.
+
+```
+{"id":"ed5e…","kind":"node","op_id":"op-0001","outcome":"skipped","qualified_name":"postgres/ops/core","reason":"name held by 570a… created by op-0092 (ingest)","reason_code":"name_held"}
+```
+
+**Stderr** gets a summary line. On seed 42:
+
+```
+undid op-0001 on graph.db: nodes restored=546 skipped=68; edges restored=584 merged=87 skipped=103
+```
+
+**Exit codes:** `0` on success. `1` on `malformed`, `op_not_found`, `not_undoable`, `already_undone`, a missing database or pending migrations. In every failure case the database is untouched.
+
+Full design: `docs/superpowers/specs/2026-11-19-undo-design.md`.
+
 ## Known limitation: undo of undo is not supported
 
 `undo <op_id>` is designed for **delete ops** (`delete_node`, `delete_edge`) recorded by `apply`. Undoing an undo, which amounts to redo, is **not supported, and adding it is not trivial**:
@@ -183,15 +216,19 @@ src/graph_undo/fixture/ops.py   ops generator (name-keyed simulator validates ev
 src/graph_undo/fixture/cli.py   gen-fixture CLI
 src/graph_undo/domain/          pure Python graph values (no I/O, no sqlite3)
 src/graph_undo/db/              the only package with SQL: connection, migrations, Store (.nodes, .edges, .log repositories)
-src/graph_undo/db/migrations/   numbered schema migrations (0001 graph tables + views, 0002 op log + removals)
+src/graph_undo/db/migrations/   numbered schema migrations (0001 graph tables + views, 0002 op log + removals, 0003 undo log)
 src/graph_undo/domain/ops.py    typed ops, parse_op, canonical(); domain/errors.py: OpError classes
 src/graph_undo/db/nodes.py, edges.py, oplog.py   NodeRepo, EdgeRepo, OpLogRepo (+ LoggedOp)
+src/graph_undo/db/undolog.py    UndoLogRepo (undos, undo_items)
+src/graph_undo/domain/undo.py   pure undo planner: rule B2 (plan_undo) and the JSONL report (report_lines)
+src/graph_undo/api/undo.py      undo_op(store, op_id) / undo_db(path, op_id): checks, reads, writes, undo log
 src/graph_undo/api/             graph rules: load.py (seed), registry.py (HANDLERS, apply_op), apply.py (apply_file)
-src/graph_undo/api/<op>.py      one handler per op kind (currently stubs)
+src/graph_undo/api/<op>.py      one handler per op kind
 src/graph_undo/api/resolve.py   require_live(ctx, field, qn): shared name resolution
-src/graph_undo/cli/             entry points: load, migrate, apply
+src/graph_undo/cli/             entry points: load, migrate, apply, undo
 tests/replay.py                independent replay of seed + ops, used by the tests
 tests/apply/                   apply tests; conftest.py has store, run, live_names, log_row, snapshot, requires
+tests/undo/                    undo tests: planner (pure), API, CLI, seed-42 invariants 1-6
 tests/test_layers.py           enforces cli -> api -> db -> domain and no SQL outside db/
 tests/                         pytest suite
 docs/superpowers/specs/     design specs

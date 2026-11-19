@@ -52,7 +52,8 @@ def _decode(raw: bytes) -> object:
         raise MalformedOp(None, "invalid JSON: nested too deeply") from None
 
 
-def _open_store(db_path: Path) -> Store:
+def open_store(db_path: Path) -> Store:
+    """Open an existing, fully migrated database, else raise ApplyError with the message to print."""
     if not db_path.is_file():
         raise ApplyError(f"no database at {db_path}; run: uv run load <seed.jsonl> --db {db_path}")
     try:
@@ -85,7 +86,7 @@ def apply_file(ops_path: str | Path, db_path: str | Path,
         data = ops_path.read_bytes()
     except OSError as e:
         raise ApplyError(f"cannot read {ops_path}: {e.strerror or e}") from e
-    store = _open_store(db_path)
+    store = open_store(db_path)
     summary = ApplySummary()
     try:
         for no, raw in enumerate(data.split(b"\n"), start=1):
