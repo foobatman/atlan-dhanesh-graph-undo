@@ -151,6 +151,9 @@ What each op records:
 | `already_has_parent` | `add_edge contains` onto a child that has a live parent |
 | `edge_not_found` | `delete_edge` of an edge that isn't live |
 | `op_id_conflict` | the `op_id` is already logged with a different payload |
+| `op_not_found` | `undo` of an `op_id` that is not in the op log |
+| `not_undoable` | `undo` of anything but an applied `delete_node` / `delete_edge` |
+| `already_undone` | `undo` of an op that was already undone (an op is undone at most once) |
 
 Full design: `docs/superpowers/specs/2026-11-19-apply-foundation-design.md` and the per-op specs `2026-11-19-op-*-design.md`.
 

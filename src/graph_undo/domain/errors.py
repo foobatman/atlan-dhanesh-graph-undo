@@ -79,3 +79,34 @@ class OpIdConflict(OpError):
     @classmethod
     def for_payload(cls, op_id: str) -> "OpIdConflict":
         return cls(op_id, f"op_id {op_id} is already in the log with a different payload")
+
+
+# ---- undo (spec: undo-design, "Errors") ----
+
+class OpNotFound(OpError):
+    """undo of an op_id that is not in the op log."""
+    code = "op_not_found"
+
+    @classmethod
+    def for_op(cls, op_id: str) -> "OpNotFound":
+        return cls(op_id, f"no applied op with id '{op_id}'")
+
+
+class NotUndoable(OpError):
+    """undo of anything but an applied delete_node / delete_edge."""
+    code = "not_undoable"
+
+    @classmethod
+    def for_op(cls, op_id: str, op: str) -> "NotUndoable":
+        return cls(op_id, f"{op} cannot be undone; only delete_node and delete_edge can")
+
+
+class AlreadyUndone(OpError):
+    """undo of an op that was already undone. Undo runs once per op."""
+    code = "already_undone"
+
+    @classmethod
+    def for_record(cls, op_id: str, undo_seq: int, after_op_id: str, counts: dict) -> "AlreadyUndone":
+        return cls(op_id, f"already undone (undo #{undo_seq}, after {after_op_id}); restored "
+                          f"{counts['restored_nodes']} nodes, {counts['restored_edges']} edges, merged "
+                          f"{counts['merged']}, skipped {counts['skipped']}. Undo runs once per op.")
