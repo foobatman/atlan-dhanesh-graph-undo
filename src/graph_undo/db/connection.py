@@ -30,3 +30,8 @@ def transaction(con: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
             con.execute("ROLLBACK")
         raise
     con.execute("COMMIT")
+
+
+def connect_readonly(path: str | Path) -> sqlite3.Connection:
+    """Open an existing db read-only (mode=ro): nothing can be written, no file is created."""
+    return sqlite3.connect(f"{Path(path).resolve().as_uri()}?mode=ro", uri=True, isolation_level=None)
