@@ -1,0 +1,26 @@
+[project]
+name = "graph-undo"
+version = "0.1.0"
+description = "Undo for subtree deletes on a SQLite-backed graph"
+readme = "README.md"
+authors = [
+    { name = "Dhanesh Arole", email = "davcdhanesh1@gmail.com" }
+]
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+gen-fixture = "graph_undo.fixture:main"
+
+[build-system]
+requires = ["uv_build>=0.13.8,<0.14.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["tests"]
