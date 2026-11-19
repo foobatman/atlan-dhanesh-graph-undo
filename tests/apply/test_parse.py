@@ -118,12 +118,12 @@ def test_error_str():
         "op-0001 actor_not_allowed: ingest may not delete_edge"
     classes = [c for c in vars(errors).values()
                if isinstance(c, type) and issubclass(c, OpError) and c is not OpError]
-    assert len(classes) == 10
+    assert len(classes) == 13
     codes = [c.code for c in classes]
     assert len(set(codes)) == len(codes)
     assert set(codes) == {"malformed", "actor_not_allowed", "node_not_found", "name_taken", "type_order",
                           "self_loop", "duplicate_edge", "already_has_parent", "edge_not_found",
-                          "op_id_conflict"}
+                          "op_id_conflict", "op_not_found", "not_undoable", "already_undone"}
 
 
 def test_error_without_op_id():

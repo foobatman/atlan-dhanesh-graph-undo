@@ -15,6 +15,7 @@ load = "graph_undo.cli.load:main"
 migrate = "graph_undo.cli.migrate:main"
 apply = "graph_undo.cli.apply:main"
 dump = "graph_undo.cli.dump:main"
+undo = "graph_undo.cli.undo:main"
 check = "undo_checker.cli:main"
 
 [build-system]

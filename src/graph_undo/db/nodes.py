@@ -74,3 +74,23 @@ class NodeRepo:
             "WHERE deleted_by IS NULL AND id IN (SELECT value FROM json_each(?))",
             (op_id, json.dumps(list(node_ids))))
         return cur.rowcount
+
+    def by_ids(self, node_ids: list[str]) -> dict[str, Node]:
+        """Rows (live or dead) for the given ids, keyed by id. Unknown ids are absent."""
+        rows = self.con.execute(
+            f"SELECT {_COLS} FROM nodes WHERE id IN (SELECT value FROM json_each(?))", (json.dumps(list(node_ids)),))
+        return {n.id: n for n in map(_node, rows)}
+
+    def live_by_names(self, names: list[str]) -> dict[str, Node]:
+        """Live nodes holding any of the given qualified names, keyed by name."""
+        rows = self.con.execute(
+            f"SELECT {_COLS} FROM nodes WHERE deleted_by IS NULL "
+            "AND qualified_name IN (SELECT value FROM json_each(?))", (json.dumps(list(names)),))
+        return {n.qualified_name: n for n in map(_node, rows)}
+
+    def revive(self, node_ids: list[str], op_id: str) -> int:
+        """Make live again the given rows whose deleted_by is op_id. Returns the number of rows updated."""
+        cur = self.con.execute(
+            "UPDATE nodes SET deleted_by = NULL "
+            "WHERE deleted_by = ? AND id IN (SELECT value FROM json_each(?))", (op_id, json.dumps(list(node_ids))))
+        return cur.rowcount

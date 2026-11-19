@@ -34,8 +34,8 @@ def kill_edge(store, edge_id, op_id="op-9000"):
 # ---- schema ----
 
 def test_load_is_at_latest_with_empty_log(store):
-    assert LATEST == 2
-    assert store.con.execute("PRAGMA user_version").fetchone()[0] == 2
+    assert LATEST == 3
+    assert store.con.execute("PRAGMA user_version").fetchone()[0] == 3
     for t in ("ops", "removed_nodes", "removed_edges"):
         assert store.con.execute(f"SELECT count(*) FROM {t}").fetchone()[0] == 0
 
@@ -55,9 +55,9 @@ def test_db_at_version_1_migrates_keeping_rows(tmp_path):
     con.close()
     r = subprocess.run(["uv", "run", "migrate", "--db", str(db)], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
-    assert r.stderr == f"migrated {db}: 1 -> 2\n"
+    assert r.stderr == f"migrated {db}: 1 -> 3\n"
     con = connect(db)
-    assert con.execute("PRAGMA user_version").fetchone()[0] == 2
+    assert con.execute("PRAGMA user_version").fetchone()[0] == 3
     assert con.execute("SELECT count(*) FROM nodes").fetchone()[0] == 2
     assert list(con.execute("SELECT id, from_id, to_id, type FROM edges")) == [(1, "c", "d", "contains")]
     assert con.execute("SELECT count(*) FROM ops").fetchone()[0] == 0

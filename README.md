@@ -2,19 +2,8 @@
 
 Undo for subtree deletes on a small SQLite-backed graph. The brief is in [problem.md](problem.md).
 
-## Status
-
-| Part | State |
-|---|---|
-| Seed fixture generator (`seed.jsonl`) | done |
-| Ops fixture generator (`ops.jsonl`) | done |
-| `load` (seed → SQLite) | done |
-| `migrate` (schema migrations) | done |
-| `apply` foundation (parse, errors, op log, registry, CLI) | done |
-| `apply` op handlers (`add_node`, `edit_node`, `delete_node`, `add_edge`, `delete_edge`) | done |
-| `dump` (live graph as sorted JSONL) | done |
-| `undo` | in progress (separate session) |
-| Checker (`uv run check`) | done: invariants 1–6 and 8 (7 skipped); its e2e tests run once `undo` is on this branch |
+- **How to call each operation**, from the shell or from Python, with exact error messages: [docs/api/](docs/api/README.md).
+- **The undo conflict rules** and what was rejected: [DECISIONS.md](DECISIONS.md).
 
 ## Setup
 
@@ -23,6 +12,36 @@ Requires [uv](https://docs.astral.sh/uv/) and Python ≥ 3.11. Every command run
 ```sh
 uv sync
 ```
+
+## Quickstart
+
+The four commands from [problem.md](problem.md), run on the seed-42 fixture. Each one is covered in detail further down.
+
+```sh
+uv run gen-fixture                        # writes fixtures/seed.jsonl and fixtures/ops.jsonl
+uv run load fixtures/seed.jsonl           # load: create ./graph.db from the seed
+uv run apply fixtures/ops.jsonl           # apply: run all 309 ops in order (op-0001 deletes postgres/ops/core)
+uv run dump > before-undo.jsonl           # dump: the live graph as sorted JSONL
+uv run undo op-0001 > report.jsonl        # undo: reverse the big delete; JSONL report, one line per removed item
+uv run dump > after-undo.jsonl
+uv run undo op-0001                       # a second undo is refused (already_undone, exit 1); the dump is unchanged
+```
+
+Expected stderr:
+
+```
+wrote fixtures/seed.jsonl: nodes=2503 edges=2801 big_schema=postgres/ops/core big_size=614 ops=309 recreated=77
+loaded graph.db: nodes=2503 edges=2801
+applied fixtures/ops.jsonl to graph.db: applied=302 noop=7 skipped=0 rejected=0
+undid op-0001 on graph.db: nodes restored=546 skipped=68; edges restored=584 merged=87 skipped=103
+op-0001 already_undone: already undone (undo #1, after op-0309); restored 546 nodes, 584 edges, merged 87, skipped 171. Undo runs once per op.
+```
+
+`report.jsonl` has 1388 lines: one for each of the 614 nodes and 774 edges op-0001 removed. See [Undo a delete](#undo-a-delete) for the rules and the report format.
+
+`load`, `apply`, `dump` and `undo` take `--db PATH` to work on a file other than `./graph.db`.
+
+To check the invariants, run `uv run check` after `gen-fixture`. It runs load, apply, undo and dump itself in a temp dir, on its own database, so it never touches `./graph.db`. It prints one PASS/FAIL/SKIP line per invariant; see [Check](#check).
 
 ## Generate the fixture
 
@@ -83,7 +102,7 @@ uv run load fixtures/seed.jsonl --db PATH    # or any other file
 
 On success it prints `loaded graph.db: nodes=2503 edges=2801` to stderr and exits 0. A bad seed prints `<seed>:<line>: <message>` and exits 1; the database is built in `<db>.tmp` and swapped in only on success, so a failed load leaves any previous database untouched.
 
-Schema (migrations `src/graph_undo/db/migrations/0001_graph.sql` and `0002_oplog.sql`), flag-in-place: deleted rows stay with `deleted_by = <op_id>`; `NULL` means live.
+Schema (migrations `src/graph_undo/db/migrations/0001_graph.sql`, `0002_oplog.sql` and `0003_undo.sql`), flag-in-place: deleted rows stay with `deleted_by = <op_id>`; `NULL` means live.
 
 | object | what |
 |---|---|
@@ -94,6 +113,8 @@ Schema (migrations `src/graph_undo/db/migrations/0001_graph.sql` and `0002_oplog
 | `effective_tags` | view: `(node_id, tags)`, own tags ∪ every ancestor's along live `contains` |
 | `ops` (0002) | op log, one row per applied op: `seq` (apply order), `op_id`, `actor_kind`, `actor_name`, `op`, `effect` (`applied`/`noop`), `node_id`, `edge_id`, `before` (edit_node's previous values, JSON), `payload` (the op as received, compact sorted JSON) |
 | `removed_nodes`, `removed_edges` (0002) | what each delete op removed: `(op_id, node_id)` / `(op_id, edge_id)`, foreign keys to `ops`, `nodes`, `edges` |
+| `undos` (0003) | one row per undone op (`op_id` unique: an op is undone at most once): `undo_seq`, `op_id`, `after_seq` (last applied op when it ran), `report` (the JSONL printed) |
+| `undo_items` (0003) | the outcome of every removed item: `(op_id, kind node/edge, item_id)`, `outcome` (`restored`/`merged`/`skipped`), `reason_code`, `new_edge_id` (merged `contains` edges) |
 
 Full design: `docs/superpowers/specs/2026-11-19-load-design.md`.
 
@@ -104,7 +125,7 @@ uv run migrate                # migrates ./graph.db
 uv run migrate --db PATH
 ```
 
-The schema is a numbered list of SQL files in `src/graph_undo/db/migrations/` (`NNNN_<name>.sql`, gap-free, never edited once committed). `PRAGMA user_version` holds the last one applied, and only the in-house runner (`db/migrate.py`, stdlib only) sets it. `load` always builds a db at the latest version. `migrate` upgrades an older db in place, one transaction per migration, and prints `migrated graph.db: 1 -> 2` or `graph.db is up to date (2)`. It exits 1 if the db is missing or newer than the code. No command migrates implicitly.
+The schema is a numbered list of SQL files in `src/graph_undo/db/migrations/` (`NNNN_<name>.sql`, gap-free, never edited once committed). `PRAGMA user_version` holds the last one applied, and only the in-house runner (`db/migrate.py`, stdlib only) sets it. `load` always builds a db at the latest version. `migrate` upgrades an older db in place, one transaction per migration, and prints `migrated graph.db: 1 -> 3` or `graph.db is up to date (3)`. It exits 1 if the db is missing or newer than the code. No command migrates implicitly.
 
 ## Apply ops
 
@@ -122,7 +143,7 @@ applied fixtures/ops.jsonl to graph.db: applied=302 noop=7 skipped=0 rejected=0
 
 - Everything after `<line>: ` is exactly `str(OpError)` (`<op_id> <code>: <message>`, or `<code>: <message>` when the line has no usable `op_id`), the same text any caller of the API gets for that op. Line numbers count `\n` only; blank lines are ignored.
 - The summary line is always printed. **Exit 0 whenever the file was processed, even with rejected ops.**
-- Exit 1, with no op attempted, only when apply cannot run: the ops file is missing or unreadable, the db is missing, the db has pending migrations (`database needs migrations [2]; run: uv run migrate --db graph.db`) or is newer than the code.
+- Exit 1, with no op attempted, only when apply cannot run: the ops file is missing or unreadable, the db is missing, the db has pending migrations (`database needs migrations [3]; run: uv run migrate --db graph.db`) or is newer than the code.
 - **Re-runs:** an `op_id` already in `ops` with the same payload is `skipped`; with a different payload it is rejected as `op_id_conflict`. Rejected ops are never logged, so a re-run tries them again.
 - New node ids are `uuid5(6f1c3a52-0d8e-4c1e-9b7a-2f4d5e6a7b8c, op_id)`, so the same seed and ops give the same db, ids included.
 
@@ -150,8 +171,43 @@ What each op records:
 | `already_has_parent` | `add_edge contains` onto a child that has a live parent |
 | `edge_not_found` | `delete_edge` of an edge that isn't live |
 | `op_id_conflict` | the `op_id` is already logged with a different payload |
+| `op_not_found` | `undo` of an `op_id` that is not in the op log |
+| `not_undoable` | `undo` of anything but an applied `delete_node` / `delete_edge` |
+| `already_undone` | `undo` of an op that was already undone (an op is undone at most once) |
 
 Full design: `docs/superpowers/specs/2026-11-19-apply-foundation-design.md` and the per-op specs `2026-11-19-op-*-design.md`.
+
+## Undo a delete
+
+```sh
+uv run undo op-0001                   # undo against ./graph.db; JSONL report on stdout
+uv run undo op-0001 --db PATH > report.jsonl
+```
+
+Only `delete_node` and `delete_edge` can be undone, and each op **at most once**. The whole undo is one transaction. Rule B2 decides each removed item, parents before children:
+
+- **Node:** `restored` if its name is free, under its original parent if that is live (or restored by this undo), otherwise under the live node that now holds the parent's name, if it has the parent's type. Otherwise `skipped`, with `name_held`, `parent_type_mismatch` or `no_live_parent`. A restored node keeps its id and its fields from delete time. Live nodes are never edited.
+- **Edge:** a `contains` edge into a node restored under a different parent is `merged`: a new edge is created from that parent, and `new_edge_id` says which. Any other edge is `restored` if both of its original endpoints are live. Otherwise it is `skipped`, with `endpoint_not_restored`, `endpoint_deleted`, `duplicate_edge` or `child_has_parent`. References are never redirected.
+
+**Report:** one JSON object per line for every node and edge the op removed, nothing else. Node lines come first (by `qualified_name`, `id`), then edge lines (by `id`). The fields are:
+- `kind`, `id`, `op_id`, `outcome`;
+- for nodes, `qualified_name`, plus `parent_id` when restored;
+- for edges, `from_id`, `to_id`, `type`, plus `new_edge_id` when merged;
+- `reason_code` and `reason` on every merged or skipped item.
+
+```
+{"id":"ed5e…","kind":"node","op_id":"op-0001","outcome":"skipped","qualified_name":"postgres/ops/core","reason":"name held by 570a… created by op-0092 (ingest)","reason_code":"name_held"}
+```
+
+**Stderr** gets a summary line. On seed 42:
+
+```
+undid op-0001 on graph.db: nodes restored=546 skipped=68; edges restored=584 merged=87 skipped=103
+```
+
+**Exit codes:** `0` on success. `1` on `malformed`, `op_not_found`, `not_undoable`, `already_undone`, a missing database or pending migrations. In every failure case the database is untouched.
+
+Full design: `docs/superpowers/specs/2026-11-19-undo-design.md`.
 
 ## Dump
 
@@ -230,15 +286,14 @@ The workdir is a temp dir, removed on success. It is kept, and its path printed,
 
 ## Known limitation: undo of undo is not supported
 
-`undo <op_id>` is designed for **delete ops** (`delete_node`, `delete_edge`) recorded by `apply`. Undoing an undo, which amounts to redo, is **not supported, and adding it is not trivial**:
+`undo <op_id>` works on **delete ops** (`delete_node`, `delete_edge`), and each one at most once. Undoing an undo, which amounts to redo, is **not supported**. Here is how far the design gets towards it:
 
-- **What the design already gives an undo of undo.** Every delete records exactly what it removed (`removed_nodes`, `removed_edges`). Removed rows stay in place with `deleted_by` and are never edited. So whatever an undo restores is identifiable by id, and the original rows are still there to re-flag.
-- **What is missing:**
-  1. **Undo does not log its own writes.** An undo of an undo would need, for each item, the outcome (restored, merged or skipped) and the exact changes: which rows it un-flagged, which fields it copied into a recreated node in a merge (with their previous values), and which edges it created. That log belongs to the undo spec and isn't designed yet.
-  2. **Merges aren't simple flag flips.** Reversing a merge means restoring the recreated node's previous field values without overwriting any human edit made after the undo (invariant 1 again, one level up).
-  3. **Changes made after the undo conflict again.** A human might edit, move or delete a restored node after the undo. Reversing the undo then needs its own conflict rules (independent, conflicting, caused), the same as undo needs for the original delete.
-  4. **The op log only accepts apply's five ops.** `ops.op` and `ops.effect` have fixed allowed values. Logging undo entries in `ops` needs a migration that rebuilds that table; giving undo its own tables avoids that.
-- **What it would take:** have undo log each item's outcome, plus the before-values of any merge, as an op of its own. Then define "undo of undo" as a re-delete of exactly the rows that undo restored, together with a reverse of the logged merges, using the same conflict rules. Redo is the extension problem.md mentions, and it is out of scope for now.
+- **Already in place:**
+  - Every delete records exactly what it removed (`removed_nodes`, `removed_edges`), and removed rows are never edited.
+  - Every undo records each item's outcome in `undo_items`, including the id of every `contains` edge it created (`new_edge_id`).
+  - Rule B2 never edits a live node, so there are no field merges to reverse.
+- **What is missing:** changes made *after* the undo conflict again. A human might edit, move or delete a restored node, or claim one of its names. Redo needs its own conflict rules (independent, conflicting, caused), the same way undo does for the original delete.
+- **What it would take:** define redo as re-flagging exactly the rows that undo restored, plus removing the edges it created, under those rules. Problem.md lists redo as the optional extension, and it is out of scope for now.
 
 ## Run the tests
 
@@ -254,16 +309,20 @@ src/graph_undo/fixture/ops.py   ops generator (name-keyed simulator validates ev
 src/graph_undo/fixture/cli.py   gen-fixture CLI
 src/graph_undo/domain/          pure Python graph values (no I/O, no sqlite3)
 src/graph_undo/db/              the only package with SQL: connection, migrations, Store (.nodes, .edges, .log repositories)
-src/graph_undo/db/migrations/   numbered schema migrations (0001 graph tables + views, 0002 op log + removals)
+src/graph_undo/db/migrations/   numbered schema migrations (0001 graph tables + views, 0002 op log + removals, 0003 undo log)
 src/graph_undo/domain/ops.py    typed ops, parse_op, canonical(); domain/errors.py: OpError classes
 src/graph_undo/db/nodes.py, edges.py, oplog.py   NodeRepo, EdgeRepo, OpLogRepo (+ LoggedOp)
+src/graph_undo/db/undolog.py    UndoLogRepo (undos, undo_items)
+src/graph_undo/domain/undo.py   pure undo planner: rule B2 (plan_undo) and the JSONL report (report_lines)
+src/graph_undo/api/undo.py      undo_op(store, op_id) / undo_db(path, op_id): checks, reads, writes, undo log
 src/graph_undo/api/             graph rules: load.py (seed), registry.py (HANDLERS, apply_op), apply.py (apply_file)
 src/graph_undo/api/<op>.py      one handler per op kind
 src/graph_undo/api/dump.py      dump_lines(db); db/dump.py: live_graph(con), one read transaction
 src/graph_undo/api/resolve.py   require_live(ctx, field, qn): shared name resolution
-src/graph_undo/cli/             entry points: load, migrate, apply, dump
+src/graph_undo/cli/             entry points: load, migrate, apply, dump, undo
 tests/replay.py                independent replay of seed + ops, used by the tests
 tests/apply/                   apply tests; conftest.py has store, run, live_names, log_row, snapshot, requires
+tests/undo/                    undo tests: planner (pure), API, CLI, seed-42 invariants 1-6
 tests/test_layers.py           enforces cli -> api -> db -> domain and no SQL outside db/
 src/undo_checker/              the checker: separate package, no graph_undo or sqlite3 imports
 src/undo_checker/model.py      parse dumps and reports; removed set (D0 − D1)
@@ -272,6 +331,23 @@ src/undo_checker/run.py        drives load/apply/dump/undo through uv run; ops s
 src/undo_checker/cli.py        `check` entry point: output and exit codes
 tests/checker/                 checker tests; e2e and mutation tests need the undo entry point
 tests/                         pytest suite
-docs/superpowers/specs/     design specs
-docs/superpowers/plans/     implementation plans
+docs/api/                      API reference: one page per operation (CLI + Python), error codes
+DECISIONS.md                   undo conflict rules (independent / conflicting / caused), rejected proposals
+tests/test_docs.py             keeps docs/api in sync: every error code listed, every Python example runs
+docs/superpowers/specs/        design specs
+docs/superpowers/plans/        implementation plans
 ```
+
+## Status
+
+| Part | State |
+|---|---|
+| Seed fixture generator (`seed.jsonl`) | done |
+| Ops fixture generator (`ops.jsonl`) | done |
+| `load` (seed → SQLite) | done |
+| `migrate` (schema migrations) | done |
+| `apply` foundation (parse, errors, op log, registry, CLI) | done |
+| `apply` op handlers (`add_node`, `edit_node`, `delete_node`, `add_edge`, `delete_edge`) | done |
+| `dump` (live graph as sorted JSONL) | done |
+| `undo` (rule B2, once per op, JSONL report) | done |
+| Checker (`uv run check`) | done: invariants 1–6 and 8; 7 skipped (not covered by this checker) |
