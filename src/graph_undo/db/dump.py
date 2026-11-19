@@ -6,10 +6,11 @@ import json
 import sqlite3
 
 
-def live_graph(con: sqlite3.Connection) -> tuple[list[dict], list[dict]]:
-    """(nodes with effective_tags, edges) of the live graph, as seen at one moment."""
+def live_graph(con: sqlite3.Connection) -> tuple[int, list[dict], list[dict]]:
+    """(schema version, nodes with effective_tags, edges) of the live graph, all read at one moment."""
     con.execute("BEGIN")
     try:
+        version = con.execute("PRAGMA user_version").fetchone()[0]
         nodes = [
             {"id": i, "qualified_name": qn, "type": t, "description": d, "owner": o,
              "tags": json.loads(tags), "effective_tags": json.loads(eff)}
@@ -19,6 +20,9 @@ def live_graph(con: sqlite3.Connection) -> tuple[list[dict], list[dict]]:
         ]
         edges = [{"from_id": f, "to_id": t, "type": ty} for f, t, ty in con.execute(
             "SELECT from_id, to_id, type FROM live_edges ORDER BY from_id, to_id, type")]
-    finally:
-        con.execute("COMMIT")
-    return nodes, edges
+    except BaseException:
+        if con.in_transaction:
+            con.execute("ROLLBACK")
+        raise
+    con.execute("COMMIT")
+    return version, nodes, edges

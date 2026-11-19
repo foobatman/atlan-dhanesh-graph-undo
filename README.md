@@ -15,8 +15,8 @@ Undo for subtree deletes on a small SQLite-backed graph. The brief is in [proble
 | `migrate` (schema migrations) | done |
 | `apply` foundation (parse, errors, op log, registry, CLI) | done |
 | `apply` op handlers (`add_node`, `edit_node`, `delete_node`, `add_edge`, `delete_edge`) | done |
+| `dump` (live graph as sorted JSONL) | done |
 | `undo` (rule B2, once per op, JSONL report) | done |
-| `dump` | not started |
 | Checker | not started |
 
 ## Setup
@@ -193,6 +193,26 @@ undid op-0001 on graph.db: nodes restored=546 skipped=68; edges restored=584 mer
 
 Full design: `docs/superpowers/specs/2026-11-19-undo-design.md`.
 
+## Dump
+
+```sh
+uv run dump                  # reads ./graph.db
+uv run dump --db PATH > graph.dump.jsonl
+```
+
+Prints the **live** graph as JSONL on stdout, using the same compact, sorted-key serialisation as `seed.jsonl`:
+
+- **Node lines** come first, sorted by `qualified_name`. Keys are `id`, `qualified_name`, `type`, `description`, `owner`, `tags` and `effective_tags`.
+- **Edge lines** follow, sorted by `(from_id, to_id, type)`. Keys are `from_id`, `to_id` and `type`.
+- Deleted rows, edge row ids and the op log are never included, so two equal graphs always dump byte-identically.
+
+```
+{"description":"…","effective_tags":["gold","pii"],"id":"…","owner":"dave","qualified_name":"snowflake/sales/public/orders/amount","tags":["pii"],"type":"column"}
+{"from_id":"…","to_id":"…","type":"contains"}
+```
+
+**Read-only.** The db is opened with `mode=ro` and read in one transaction, so a dump issues no writes and always shows one consistent moment. If a writer such as `undo` crashed mid-transaction and left a hot journal, dump reopens the db normally so SQLite's crash recovery rolls back to the last commit, and prints that state. That's the dump invariant 7 asks for between a crashed and a resumed undo. It exits 1 with a message, and no output, if the db is missing, isn't SQLite, has pending migrations or is newer than the code.
+
 ## Known limitation: undo of undo is not supported
 
 `undo <op_id>` works on **delete ops** (`delete_node`, `delete_edge`), and each one at most once. Undoing an undo, which amounts to redo, is **not supported**. Here is how far the design gets towards it:
@@ -226,8 +246,9 @@ src/graph_undo/domain/undo.py   pure undo planner: rule B2 (plan_undo) and the J
 src/graph_undo/api/undo.py      undo_op(store, op_id) / undo_db(path, op_id): checks, reads, writes, undo log
 src/graph_undo/api/             graph rules: load.py (seed), registry.py (HANDLERS, apply_op), apply.py (apply_file)
 src/graph_undo/api/<op>.py      one handler per op kind
+src/graph_undo/api/dump.py      dump_lines(db); db/dump.py: live_graph(con), one read transaction
 src/graph_undo/api/resolve.py   require_live(ctx, field, qn): shared name resolution
-src/graph_undo/cli/             entry points: load, migrate, apply, undo
+src/graph_undo/cli/             entry points: load, migrate, apply, dump, undo
 tests/replay.py                independent replay of seed + ops, used by the tests
 tests/apply/                   apply tests; conftest.py has store, run, live_names, log_row, snapshot, requires
 tests/undo/                    undo tests: planner (pure), API, CLI, seed-42 invariants 1-6

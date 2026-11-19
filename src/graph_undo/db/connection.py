@@ -32,6 +32,28 @@ def transaction(con: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
     con.execute("COMMIT")
 
 
+SQLITE_READONLY_ROLLBACK = 776   # a hot journal exists and a read-only connection cannot roll it back
+
+
 def connect_readonly(path: str | Path) -> sqlite3.Connection:
-    """Open an existing db read-only (mode=ro): nothing can be written, no file is created."""
-    return sqlite3.connect(f"{Path(path).resolve().as_uri()}?mode=ro", uri=True, isolation_level=None)
+    """Open an existing db for reading only. Nothing is written by the caller and no file is created.
+
+    Opened with mode=ro. If a writer crashed mid-transaction (hot journal), a read-only connection cannot
+    read at all; then the db is reopened normally so SQLite's own crash recovery rolls the journal back to
+    the last committed state. That recovery is the only write that can happen, and it changes no data.
+    """
+    uri = f"{Path(path).resolve().as_uri()}?mode=ro"
+    con = sqlite3.connect(uri, uri=True, isolation_level=None)
+    try:
+        con.execute("PRAGMA user_version").fetchone()
+    except sqlite3.OperationalError as e:
+        if getattr(e, "sqlite_errorcode", None) != SQLITE_READONLY_ROLLBACK:
+            con.close()
+            raise
+        con.close()
+        con = sqlite3.connect(Path(path), isolation_level=None)
+        con.execute("PRAGMA user_version").fetchone()      # triggers the hot-journal rollback
+    except BaseException:
+        con.close()
+        raise
+    return con
