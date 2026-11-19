@@ -91,6 +91,18 @@ Schema (`src/graph_undo/schema.sql`), flag-in-place: deleted rows stay with `del
 
 Full design: `docs/superpowers/specs/2026-11-19-load-design.md`.
 
+## Known limitation: undo of undo is not supported
+
+`undo <op_id>` is designed for **delete ops** (`delete_node`, `delete_edge`) recorded by `apply`. Undoing an undo, which amounts to redo, is **not supported, and adding it is not trivial**:
+
+- **What the design already gives an undo of undo.** Every delete records exactly what it removed (`removed_nodes`, `removed_edges`). Removed rows stay in place with `deleted_by` and are never edited. So whatever an undo restores is identifiable by id, and the original rows are still there to re-flag.
+- **What is missing:**
+  1. **Undo does not log its own writes.** An undo of an undo would need, for each item, the outcome (restored, merged or skipped) and the exact changes: which rows it un-flagged, which fields it copied into a recreated node in a merge (with their previous values), and which edges it created. That log belongs to the undo spec and isn't designed yet.
+  2. **Merges aren't simple flag flips.** Reversing a merge means restoring the recreated node's previous field values without overwriting any human edit made after the undo (invariant 1 again, one level up).
+  3. **Changes made after the undo conflict again.** A human might edit, move or delete a restored node after the undo. Reversing the undo then needs its own conflict rules (independent, conflicting, caused), the same as undo needs for the original delete.
+  4. **The op log only accepts apply's five ops.** `ops.op` and `ops.effect` have fixed allowed values. Logging undo entries in `ops` needs a migration that rebuilds that table; giving undo its own tables avoids that.
+- **What it would take:** have undo log each item's outcome, plus the before-values of any merge, as an op of its own. Then define "undo of undo" as a re-delete of exactly the rows that undo restored, together with a reverse of the logged merges, using the same conflict rules. Redo is the extension problem.md mentions, and it is out of scope for now.
+
 ## Run the tests
 
 ```sh
