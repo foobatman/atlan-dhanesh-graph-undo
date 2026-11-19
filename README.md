@@ -12,7 +12,8 @@ Undo for subtree deletes on a small SQLite-backed graph. The brief is in [proble
 | `migrate` (schema migrations) | done |
 | `apply` foundation (parse, errors, op log, registry, CLI) | done |
 | `apply` op handlers (`add_node`, `edit_node`, `delete_node`, `add_edge`, `delete_edge`) | done |
-| `undo` / `dump` | not started |
+| `dump` (live graph as sorted JSONL) | done |
+| `undo` | in progress (separate session) |
 | Checker | not started |
 
 ## Setup
@@ -152,6 +153,26 @@ What each op records:
 
 Full design: `docs/superpowers/specs/2026-11-19-apply-foundation-design.md` and the per-op specs `2026-11-19-op-*-design.md`.
 
+## Dump
+
+```sh
+uv run dump                  # reads ./graph.db
+uv run dump --db PATH > graph.dump.jsonl
+```
+
+Prints the **live** graph as JSONL on stdout, using the same compact, sorted-key serialisation as `seed.jsonl`:
+
+- **Node lines** come first, sorted by `qualified_name`. Keys are `id`, `qualified_name`, `type`, `description`, `owner`, `tags` and `effective_tags`.
+- **Edge lines** follow, sorted by `(from_id, to_id, type)`. Keys are `from_id`, `to_id` and `type`.
+- Deleted rows, edge row ids and the op log are never included, so two equal graphs always dump byte-identically.
+
+```
+{"description":"…","effective_tags":["gold","pii"],"id":"…","owner":"dave","qualified_name":"snowflake/sales/public/orders/amount","tags":["pii"],"type":"column"}
+{"from_id":"…","to_id":"…","type":"contains"}
+```
+
+**Read-only.** The db is opened with `mode=ro` and read in one transaction, so a dump never changes the file and always shows one consistent moment, even next to a crashed undo. It exits 1 with a message, and no output, if the db is missing, isn't SQLite, has pending migrations or is newer than the code.
+
 ## Known limitation: undo of undo is not supported
 
 `undo <op_id>` is designed for **delete ops** (`delete_node`, `delete_edge`) recorded by `apply`. Undoing an undo, which amounts to redo, is **not supported, and adding it is not trivial**:
@@ -182,9 +203,10 @@ src/graph_undo/db/migrations/   numbered schema migrations (0001 graph tables + 
 src/graph_undo/domain/ops.py    typed ops, parse_op, canonical(); domain/errors.py: OpError classes
 src/graph_undo/db/nodes.py, edges.py, oplog.py   NodeRepo, EdgeRepo, OpLogRepo (+ LoggedOp)
 src/graph_undo/api/             graph rules: load.py (seed), registry.py (HANDLERS, apply_op), apply.py (apply_file)
-src/graph_undo/api/<op>.py      one handler per op kind (currently stubs)
+src/graph_undo/api/<op>.py      one handler per op kind
+src/graph_undo/api/dump.py      dump_lines(db); db/dump.py: live_graph(con), one read transaction
 src/graph_undo/api/resolve.py   require_live(ctx, field, qn): shared name resolution
-src/graph_undo/cli/             entry points: load, migrate, apply
+src/graph_undo/cli/             entry points: load, migrate, apply, dump
 tests/replay.py                independent replay of seed + ops, used by the tests
 tests/apply/                   apply tests; conftest.py has store, run, live_names, log_row, snapshot, requires
 tests/test_layers.py           enforces cli -> api -> db -> domain and no SQL outside db/
