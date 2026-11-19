@@ -5,7 +5,7 @@ Applies any pending schema migrations (`src/graph_undo/db/migrations/NNNN_*.sql`
 - `0002`: the op log and removals;
 - `0003`: the undo log.
 
-`apply` and `undo` never migrate on their own. If a migration is pending, they refuse to run and print `database needs migrations [N…]; run: uv run migrate --db <db>`.
+`apply`, `undo` and `dump` never migrate on their own. If a migration is pending, they refuse to run and print `database needs migrations [N…]; run: uv run migrate --db <db>`.
 
 ## CLI
 

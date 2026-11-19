@@ -86,7 +86,7 @@ uv run load fixtures/seed.jsonl --db PATH    # or any other file
 
 On success it prints `loaded graph.db: nodes=2503 edges=2801` to stderr and exits 0. A bad seed prints `<seed>:<line>: <message>` and exits 1; the database is built in `<db>.tmp` and swapped in only on success, so a failed load leaves any previous database untouched.
 
-Schema (migrations `src/graph_undo/db/migrations/0001_graph.sql` and `0002_oplog.sql`), flag-in-place: deleted rows stay with `deleted_by = <op_id>`; `NULL` means live.
+Schema (migrations `src/graph_undo/db/migrations/0001_graph.sql`, `0002_oplog.sql` and `0003_undo.sql`), flag-in-place: deleted rows stay with `deleted_by = <op_id>`; `NULL` means live.
 
 | object | what |
 |---|---|
@@ -109,7 +109,7 @@ uv run migrate                # migrates ./graph.db
 uv run migrate --db PATH
 ```
 
-The schema is a numbered list of SQL files in `src/graph_undo/db/migrations/` (`NNNN_<name>.sql`, gap-free, never edited once committed). `PRAGMA user_version` holds the last one applied, and only the in-house runner (`db/migrate.py`, stdlib only) sets it. `load` always builds a db at the latest version. `migrate` upgrades an older db in place, one transaction per migration, and prints `migrated graph.db: 1 -> 2` or `graph.db is up to date (2)`. It exits 1 if the db is missing or newer than the code. No command migrates implicitly.
+The schema is a numbered list of SQL files in `src/graph_undo/db/migrations/` (`NNNN_<name>.sql`, gap-free, never edited once committed). `PRAGMA user_version` holds the last one applied, and only the in-house runner (`db/migrate.py`, stdlib only) sets it. `load` always builds a db at the latest version. `migrate` upgrades an older db in place, one transaction per migration, and prints `migrated graph.db: 1 -> 3` or `graph.db is up to date (3)`. It exits 1 if the db is missing or newer than the code. No command migrates implicitly.
 
 ## Apply ops
 
@@ -127,7 +127,7 @@ applied fixtures/ops.jsonl to graph.db: applied=302 noop=7 skipped=0 rejected=0
 
 - Everything after `<line>: ` is exactly `str(OpError)` (`<op_id> <code>: <message>`, or `<code>: <message>` when the line has no usable `op_id`), the same text any caller of the API gets for that op. Line numbers count `\n` only; blank lines are ignored.
 - The summary line is always printed. **Exit 0 whenever the file was processed, even with rejected ops.**
-- Exit 1, with no op attempted, only when apply cannot run: the ops file is missing or unreadable, the db is missing, the db has pending migrations (`database needs migrations [2]; run: uv run migrate --db graph.db`) or is newer than the code.
+- Exit 1, with no op attempted, only when apply cannot run: the ops file is missing or unreadable, the db is missing, the db has pending migrations (`database needs migrations [3]; run: uv run migrate --db graph.db`) or is newer than the code.
 - **Re-runs:** an `op_id` already in `ops` with the same payload is `skipped`; with a different payload it is rejected as `op_id_conflict`. Rejected ops are never logged, so a re-run tries them again.
 - New node ids are `uuid5(6f1c3a52-0d8e-4c1e-9b7a-2f4d5e6a7b8c, op_id)`, so the same seed and ops give the same db, ids included.
 
@@ -254,9 +254,9 @@ tests/apply/                   apply tests; conftest.py has store, run, live_nam
 tests/undo/                    undo tests: planner (pure), API, CLI, seed-42 invariants 1-6
 tests/test_layers.py           enforces cli -> api -> db -> domain and no SQL outside db/
 tests/                         pytest suite
-docs/api/                   API reference: one page per operation (CLI + Python), error codes
-DECISIONS.md                undo conflict rules (independent / conflicting / caused), rejected proposals
-tests/test_docs.py          keeps docs/api in sync: every error code listed, every Python example runs
-docs/superpowers/specs/     design specs
-docs/superpowers/plans/     implementation plans
+docs/api/                      API reference: one page per operation (CLI + Python), error codes
+DECISIONS.md                   undo conflict rules (independent / conflicting / caused), rejected proposals
+tests/test_docs.py             keeps docs/api in sync: every error code listed, every Python example runs
+docs/superpowers/specs/        design specs
+docs/superpowers/plans/        implementation plans
 ```

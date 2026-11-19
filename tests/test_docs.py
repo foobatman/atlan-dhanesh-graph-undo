@@ -11,7 +11,7 @@ from graph_undo.api.registry import HANDLERS
 from graph_undo.domain import errors
 
 DOCS = Path(__file__).resolve().parents[1] / "docs" / "api"
-OPERATIONS = sorted(HANDLERS) + ["apply", "load", "migrate", "undo"]
+OPERATIONS = sorted(HANDLERS) + ["apply", "dump", "load", "migrate", "undo"]
 BLOCK = re.compile(r"```python\n(.*?)```", re.S)
 
 

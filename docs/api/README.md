@@ -13,6 +13,7 @@ Every operation can be run two ways: from the shell (`uv run <command>`), or fro
 | `add_edge` | add a `contains` or `references` edge | [add_edge](add_edge.md) |
 | `delete_edge` | delete one edge | [delete_edge](delete_edge.md) |
 | undo | reverse one `delete_node` or `delete_edge`, once | [undo](undo.md) |
+| dump | print the live graph as sorted JSONL (read-only) | [dump](dump.md) |
 
 The design behind undo's conflict rules is in [`DECISIONS.md`](../../DECISIONS.md).
 
@@ -75,3 +76,4 @@ str(e) == f"{op_id} {code}: {message}"      # e.g. "op-0002 node_not_found: node
 | `uv run migrate` | migrated, or already up to date | migration failed, or the database is newer than the code |
 | `uv run apply` | file processed, **even if some ops were rejected** (each one printed to stderr) | ops file or database missing, migrations pending |
 | `uv run undo` | undone, report on stdout | any `OpError` above, database missing, migrations pending |
+| `uv run dump` | live graph printed on stdout | database missing or not SQLite, migrations pending, database newer than the code (`DumpError`) |
