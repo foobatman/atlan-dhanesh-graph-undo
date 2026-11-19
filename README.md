@@ -2,6 +2,9 @@
 
 Undo for subtree deletes on a small SQLite-backed graph. The brief is in [problem.md](problem.md).
 
+- **How to call each operation**, from the shell or from Python, with exact error messages: [docs/api/](docs/api/README.md).
+- **The undo conflict rules** and what was rejected: [DECISIONS.md](DECISIONS.md).
+
 ## Status
 
 | Part | State |
@@ -192,15 +195,14 @@ Full design: `docs/superpowers/specs/2026-11-19-undo-design.md`.
 
 ## Known limitation: undo of undo is not supported
 
-`undo <op_id>` is designed for **delete ops** (`delete_node`, `delete_edge`) recorded by `apply`. Undoing an undo, which amounts to redo, is **not supported, and adding it is not trivial**:
+`undo <op_id>` works on **delete ops** (`delete_node`, `delete_edge`), and each one at most once. Undoing an undo, which amounts to redo, is **not supported**. Here is how far the design gets towards it:
 
-- **What the design already gives an undo of undo.** Every delete records exactly what it removed (`removed_nodes`, `removed_edges`). Removed rows stay in place with `deleted_by` and are never edited. So whatever an undo restores is identifiable by id, and the original rows are still there to re-flag.
-- **What is missing:**
-  1. **Undo does not log its own writes.** An undo of an undo would need, for each item, the outcome (restored, merged or skipped) and the exact changes: which rows it un-flagged, which fields it copied into a recreated node in a merge (with their previous values), and which edges it created. That log belongs to the undo spec and isn't designed yet.
-  2. **Merges aren't simple flag flips.** Reversing a merge means restoring the recreated node's previous field values without overwriting any human edit made after the undo (invariant 1 again, one level up).
-  3. **Changes made after the undo conflict again.** A human might edit, move or delete a restored node after the undo. Reversing the undo then needs its own conflict rules (independent, conflicting, caused), the same as undo needs for the original delete.
-  4. **The op log only accepts apply's five ops.** `ops.op` and `ops.effect` have fixed allowed values. Logging undo entries in `ops` needs a migration that rebuilds that table; giving undo its own tables avoids that.
-- **What it would take:** have undo log each item's outcome, plus the before-values of any merge, as an op of its own. Then define "undo of undo" as a re-delete of exactly the rows that undo restored, together with a reverse of the logged merges, using the same conflict rules. Redo is the extension problem.md mentions, and it is out of scope for now.
+- **Already in place:**
+  - Every delete records exactly what it removed (`removed_nodes`, `removed_edges`), and removed rows are never edited.
+  - Every undo records each item's outcome in `undo_items`, including the id of every `contains` edge it created (`new_edge_id`).
+  - Rule B2 never edits a live node, so there are no field merges to reverse.
+- **What is missing:** changes made *after* the undo conflict again. A human might edit, move or delete a restored node, or claim one of its names. Redo needs its own conflict rules (independent, conflicting, caused), the same way undo does for the original delete.
+- **What it would take:** define redo as re-flagging exactly the rows that undo restored, plus removing the edges it created, under those rules. Problem.md lists redo as the optional extension, and it is out of scope for now.
 
 ## Run the tests
 
@@ -231,6 +233,9 @@ tests/apply/                   apply tests; conftest.py has store, run, live_nam
 tests/undo/                    undo tests: planner (pure), API, CLI, seed-42 invariants 1-6
 tests/test_layers.py           enforces cli -> api -> db -> domain and no SQL outside db/
 tests/                         pytest suite
+docs/api/                   API reference: one page per operation (CLI + Python), error codes
+DECISIONS.md                undo conflict rules (independent / conflicting / caused), rejected proposals
+tests/test_docs.py          keeps docs/api in sync: every error code listed, every Python example runs
 docs/superpowers/specs/     design specs
 docs/superpowers/plans/     implementation plans
 ```
