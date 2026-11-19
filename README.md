@@ -5,20 +5,6 @@ Undo for subtree deletes on a small SQLite-backed graph. The brief is in [proble
 - **How to call each operation**, from the shell or from Python, with exact error messages: [docs/api/](docs/api/README.md).
 - **The undo conflict rules** and what was rejected: [DECISIONS.md](DECISIONS.md).
 
-## Status
-
-| Part | State |
-|---|---|
-| Seed fixture generator (`seed.jsonl`) | done |
-| Ops fixture generator (`ops.jsonl`) | done |
-| `load` (seed → SQLite) | done |
-| `migrate` (schema migrations) | done |
-| `apply` foundation (parse, errors, op log, registry, CLI) | done |
-| `apply` op handlers (`add_node`, `edit_node`, `delete_node`, `add_edge`, `delete_edge`) | done |
-| `dump` (live graph as sorted JSONL) | done |
-| `undo` (rule B2, once per op, JSONL report) | done |
-| Checker | not started |
-
 ## Setup
 
 Requires [uv](https://docs.astral.sh/uv/) and Python ≥ 3.11. Every command runs through `uv run`, so no virtualenv activation is needed.
@@ -26,6 +12,34 @@ Requires [uv](https://docs.astral.sh/uv/) and Python ≥ 3.11. Every command run
 ```sh
 uv sync
 ```
+
+## Quickstart
+
+The four commands from [problem.md](problem.md), run on the seed-42 fixture. Each one is covered in detail further down.
+
+```sh
+uv run gen-fixture                        # writes fixtures/seed.jsonl and fixtures/ops.jsonl
+uv run load fixtures/seed.jsonl           # load: create ./graph.db from the seed
+uv run apply fixtures/ops.jsonl           # apply: run all 309 ops in order (op-0001 deletes postgres/ops/core)
+uv run dump > before-undo.jsonl           # dump: the live graph as sorted JSONL
+uv run undo op-0001 > report.jsonl        # undo: reverse the big delete; JSONL report, one line per removed item
+uv run dump > after-undo.jsonl
+uv run undo op-0001                       # a second undo is refused (already_undone, exit 1); the dump is unchanged
+```
+
+Expected stderr:
+
+```
+wrote fixtures/seed.jsonl: nodes=2503 edges=2801 big_schema=postgres/ops/core big_size=614 ops=309 recreated=77
+loaded graph.db: nodes=2503 edges=2801
+applied fixtures/ops.jsonl to graph.db: applied=302 noop=7 skipped=0 rejected=0
+undid op-0001 on graph.db: nodes restored=546 skipped=68; edges restored=584 merged=87 skipped=103
+op-0001 already_undone: already undone (undo #1, after op-0309); restored 546 nodes, 584 edges, merged 87, skipped 171. Undo runs once per op.
+```
+
+`report.jsonl` has 1388 lines: one for each of the 614 nodes and 774 edges op-0001 removed. See [Undo a delete](#undo-a-delete) for the rules and the report format.
+
+`load`, `apply`, `dump` and `undo` take `--db PATH` to work on a file other than `./graph.db`.
 
 ## Generate the fixture
 
@@ -260,3 +274,17 @@ tests/test_docs.py             keeps docs/api in sync: every error code listed, 
 docs/superpowers/specs/        design specs
 docs/superpowers/plans/        implementation plans
 ```
+
+## Status
+
+| Part | State |
+|---|---|
+| Seed fixture generator (`seed.jsonl`) | done |
+| Ops fixture generator (`ops.jsonl`) | done |
+| `load` (seed → SQLite) | done |
+| `migrate` (schema migrations) | done |
+| `apply` foundation (parse, errors, op log, registry, CLI) | done |
+| `apply` op handlers (`add_node`, `edit_node`, `delete_node`, `add_edge`, `delete_edge`) | done |
+| `dump` (live graph as sorted JSONL) | done |
+| `undo` (rule B2, once per op, JSONL report) | done |
+| Checker | not started |
