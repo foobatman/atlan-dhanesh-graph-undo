@@ -39,6 +39,7 @@ CREATE VIEW effective_tags AS
     UNION
     SELECT anc.node_id, e.from_id
       FROM anc JOIN live_edges e ON e.to_id = anc.anc_id AND e.type = 'contains'
+               JOIN live_nodes p ON p.id = e.from_id      -- never walk through a dead ancestor
   ),
   tagged AS (
     SELECT node_id, json_group_array(tag) AS tags

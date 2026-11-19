@@ -212,3 +212,77 @@ def test_partial_indexes_ignore_dead_rows(tmp_path):
         con.execute("INSERT INTO nodes VALUES ('k3','conn/db/sc/t/k','column','','','[]',NULL)")
     with pytest.raises(sqlite3.IntegrityError):
         con.execute("INSERT INTO edges (from_id,to_id,type) VALUES ('c','u','contains')")   # second live parent
+
+
+# ---- review fixes ----
+
+def test_unicode_line_separators_preserved(tmp_path):
+    text = "a b c\x85d\x0ce"
+    seed = tmp_path / "s.jsonl"
+    seed.write_text(json.dumps({**node("a", "c"), "description": text}, ensure_ascii=False) + "\n"
+                    + json.dumps(BAD["self_loop"]) + "\n", encoding="utf-8")
+    with pytest.raises(LoadError) as ei:          # line numbers count only \n
+        load_seed(seed, tmp_path / "g.db")
+    assert ei.value.line == 2
+    seed.write_text(json.dumps({**node("a", "c"), "description": text}, ensure_ascii=False) + "\n",
+                    encoding="utf-8")
+    load_seed(seed, tmp_path / "g.db")
+    assert connect(tmp_path / "g.db").execute("SELECT description FROM nodes").fetchone()[0] == text
+
+
+def test_db_same_as_seed_refused(tmp_path):
+    seed = write_lines(tmp_path / "s.jsonl", BASE)
+    before = seed.read_bytes()
+    with pytest.raises(LoadError) as ei:
+        load_seed(seed, seed)
+    assert ei.value.line == 0
+    assert seed.read_bytes() == before
+    link = tmp_path / "link.db"
+    link.symlink_to(seed)
+    with pytest.raises(LoadError):
+        load_seed(seed, link)
+    assert seed.read_bytes() == before
+
+
+def test_effective_tags_skip_dead_ancestor(tmp_path):
+    rows = [node("c", "c", tags=["top"]), node("d", "c/d", "database"), node("s", "c/d/s", "schema"),
+            edge("c", "d"), edge("d", "s")]
+    db = tmp_path / "g.db"
+    load_seed(write_lines(tmp_path / "s.jsonl", rows), db)
+    con = connect(db)
+    con.execute("UPDATE nodes SET deleted_by='op-x' WHERE id='d'")   # node dead, edges left live
+    assert con.execute("SELECT tags FROM effective_tags WHERE node_id='s'").fetchone()[0] == "[]"
+
+
+def test_missing_db_dir(tmp_path):
+    with pytest.raises(LoadError) as ei:
+        load_seed(write_lines(tmp_path / "s.jsonl", BASE), tmp_path / "nodir" / "g.db")
+    assert ei.value.line == 0
+
+
+def test_duplicate_json_keys_rejected(tmp_path):
+    seed = tmp_path / "s.jsonl"
+    seed.write_text('{"id":"a","id":"b","qualified_name":"c","type":"connection",'
+                    '"description":"","owner":"","tags":[]}\n')
+    with pytest.raises(LoadError) as ei:
+        load_seed(seed, tmp_path / "g.db")
+    assert ei.value.line == 1
+
+
+def test_lone_surrogate_rejected(tmp_path):
+    seed = tmp_path / "s.jsonl"
+    seed.write_text(json.dumps({**node("a", "c"), "owner": "\ud800"}) + "\n")
+    with pytest.raises(LoadError) as ei:
+        load_seed(seed, tmp_path / "g.db")
+    assert ei.value.line == 1
+    assert not (tmp_path / "g.db.tmp").exists()
+
+
+def test_stale_side_files_removed(tmp_path):
+    db = tmp_path / "g.db"
+    for suffix in ("-journal", "-wal", "-shm"):
+        (tmp_path / f"g.db{suffix}").write_bytes(b"stale")
+    load_seed(write_lines(tmp_path / "s.jsonl", BASE), db)
+    for suffix in ("-journal", "-wal", "-shm"):
+        assert not (tmp_path / f"g.db{suffix}").exists()
+    assert connect(db).execute("SELECT count(*) FROM nodes").fetchone()[0] == 6

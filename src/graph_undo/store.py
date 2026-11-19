@@ -22,6 +22,14 @@ class LoadError(Exception):
         self.message = message
 
 
+def _no_duplicate_keys(pairs: list[tuple[str, object]]) -> dict:
+    keys = [k for k, _ in pairs]
+    dupes = sorted({k for k in keys if keys.count(k) > 1})
+    if dupes:
+        raise ValueError(f"duplicate keys {dupes}")
+    return dict(pairs)
+
+
 def connect(path: str | Path) -> sqlite3.Connection:
     con = sqlite3.connect(path)
     con.execute("PRAGMA foreign_keys = ON")
@@ -34,13 +42,16 @@ def _parse(seed_path: Path) -> tuple[list[tuple[int, dict]], list[tuple[int, dic
     except OSError as e:
         raise LoadError(0, f"cannot read seed: {e}") from e
     nodes, edges = [], []
-    for no, raw in enumerate(text.splitlines(), start=1):
+    # split on \n only: str.splitlines() would also break on U+2028, \x85, \x0c ... inside JSON strings
+    for no, raw in enumerate(text.split("\n"), start=1):
         if not raw.strip():
             continue
         try:
-            row = json.loads(raw)
+            row = json.loads(raw, object_pairs_hook=_no_duplicate_keys)
         except json.JSONDecodeError as e:
             raise LoadError(no, f"invalid JSON: {e.msg}") from e
+        except ValueError as e:
+            raise LoadError(no, str(e)) from e
         if not isinstance(row, dict):
             raise LoadError(no, "line is not a JSON object")
         is_edge = "from_id" in row
@@ -54,6 +65,10 @@ def _parse(seed_path: Path) -> tuple[list[tuple[int, dict]], list[tuple[int, dic
                     raise LoadError(no, "tags must be a list of strings")
             elif not isinstance(v, str):
                 raise LoadError(no, f"{k} must be a string")
+        try:
+            json.dumps(row, ensure_ascii=False).encode("utf-8")
+        except UnicodeEncodeError as e:
+            raise LoadError(no, "string is not valid UTF-8 (lone surrogate)") from e
         if row["type"] not in kinds:
             raise LoadError(no, f"unknown {'edge' if is_edge else 'node'} type {row['type']!r}")
         (edges if is_edge else nodes).append((no, row))
@@ -101,6 +116,8 @@ def _insert(con: sqlite3.Connection, nodes, edges) -> None:
 def load_seed(seed_path: str | Path, db_path: str | Path) -> tuple[int, int]:
     """Create db_path from seed_path, replacing any existing file. All or nothing."""
     seed_path, db_path = Path(seed_path), Path(db_path)
+    if db_path.resolve() == seed_path.resolve():
+        raise LoadError(0, f"--db {db_path} is the seed file; refusing to overwrite it")
     nodes, edges = _parse(seed_path)
     tmp = db_path.with_name(db_path.name + ".tmp")
     tmp.unlink(missing_ok=True)
@@ -112,7 +129,12 @@ def load_seed(seed_path: str | Path, db_path: str | Path) -> tuple[int, int]:
                 _insert(con, nodes, edges)
         finally:
             con.close()
+        for side in ("-journal", "-wal", "-shm"):   # stale side files of the old db must not touch the new one
+            db_path.with_name(db_path.name + side).unlink(missing_ok=True)
         os.replace(tmp, db_path)
+    except (sqlite3.Error, OSError) as e:
+        tmp.unlink(missing_ok=True)
+        raise LoadError(0, f"cannot write {db_path}: {e}") from e
     except BaseException:
         tmp.unlink(missing_ok=True)
         raise
