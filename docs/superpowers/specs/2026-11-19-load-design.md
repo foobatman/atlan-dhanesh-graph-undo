@@ -5,7 +5,7 @@
 
 ## Intent
 
-There is one command, `uv run graph-undo load fixtures/seed.jsonl`. It builds a fresh SQLite file holding the seed graph. The schema it creates is the base that `apply`, `undo`, `dump` and the checker will build on. It is designed so that a delete can later be undone without copying rows anywhere.
+There is one command, `uv run load fixtures/seed.jsonl`. It builds a fresh SQLite file holding the seed graph. The schema it creates is the base that `apply`, `undo`, `dump` and the checker will build on. It is designed so that a delete can later be undone without copying rows anywhere.
 
 ## Goals
 
@@ -108,11 +108,11 @@ Later, under the operations spec, a delete of `…/orders` by op-0007 sets `dele
 ## The command
 
 ```
-uv run graph-undo load fixtures/seed.jsonl            # writes ./graph.db
-uv run graph-undo load fixtures/seed.jsonl --db PATH
+uv run load fixtures/seed.jsonl            # writes ./graph.db
+uv run load fixtures/seed.jsonl --db PATH
 ```
 
-- **Entry point.** `[project.scripts] graph-undo = "graph_undo.cli:main"`, using argparse subcommands. Only `load` exists for now. `apply`, `undo` and `dump` are added by later specs.
+- **Entry point.** `[project.scripts] load = "graph_undo.cli:load_main"`. Each command is its own script named after the command: later specs add `apply`, `undo` and `dump` the same way (`uv run apply ops.jsonl`, `uv run undo <op_id>`, `uv run dump`). They share `--db PATH`, which defaults to `graph.db`.
 - **Replacement.** `load` always creates the database from scratch. An existing file at `--db` is replaced.
 - **All or nothing.**
   1. Build at `<db>.tmp`, deleting any stale tmp file first.
@@ -149,7 +149,7 @@ uv run graph-undo load fixtures/seed.jsonl --db PATH
 |---|---|
 | `src/graph_undo/schema.sql` | DDL above |
 | `src/graph_undo/store.py` | `connect(path) -> sqlite3.Connection` (foreign keys on) and `load_seed(seed_path, db_path) -> (n_nodes, n_edges)`, raising `LoadError(line, message)` |
-| `src/graph_undo/cli.py` | `main(argv=None)` with argparse subcommands |
+| `src/graph_undo/cli.py` | `load_main(argv=None)`, one argparse parser per command; later commands add `apply_main` and the rest |
 | `.gitignore` | Add `*.db`, `*.db.tmp` |
 | `README.md` | Status table, the `load` command, schema summary, layout |
 
@@ -165,7 +165,7 @@ The runtime is stdlib only (`sqlite3`, `json`, `argparse`).
 - A failed load over an existing `<db>` leaves it byte-identical.
 - Loading twice replaces the database. Two loads of the same seed have identical table contents.
 - The partial indexes accept a second row with a live name once the first row is marked dead (a direct SQL test of the B model).
-- `uv run graph-undo load` works end to end through the entry point.
+- `uv run load fixtures/seed.jsonl` works end to end through the entry point.
 
 ## Left to the builder
 
