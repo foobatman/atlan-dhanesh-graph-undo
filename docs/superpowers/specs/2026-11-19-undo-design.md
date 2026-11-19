@@ -91,7 +91,7 @@ Nodes are written before edges, so no statement leaves a live edge with a dead e
 
 E holds one edge e, and N is empty.
 - If both endpoints are live and no live `(from, to, type)` edge exists: **restored**.
-- For `contains`, if the child already has a live parent (the generator always re-parents after a `delete_edge contains`): **skipped**, `child_has_parent`: "`<c.qn>` now has parent `<qn>` (moved by `<op_id>`)".
+- For `contains`, if the child already has a live parent (the generator always re-parents after a `delete_edge contains`): **skipped**, `child_has_parent`: "`<c.qn>` now has parent `<qn>`".
 - Otherwise `endpoint_deleted` or `duplicate_edge`, as in the table above.
 
 ### Why the invariants hold
