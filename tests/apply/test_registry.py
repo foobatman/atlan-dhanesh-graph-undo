@@ -81,7 +81,7 @@ def test_requires_skips_for_stubs():
 
 def test_requires_passes_for_registered_non_stub(monkeypatch):
     mod = importlib.import_module("graph_undo.api.add_edge")
-    monkeypatch.setattr(mod, "STUB", False)
+    monkeypatch.setattr(mod, "STUB", False, raising=False)
     requires("add_edge")           # no skip
 
 
