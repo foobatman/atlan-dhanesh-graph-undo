@@ -23,7 +23,8 @@ def handle(ctx: OpContext, op: DeleteEdge) -> OpResult:
         raise EdgeNotFound(op.op_id, f"no live {op.type} edge '{op.from_}' -> '{op.to}'")
 
     updated = store.edges.mark_deleted([edge.id], op.op_id)
-    assert updated == 1, f"bug: delete_edge {op.op_id} marked {updated} rows, expected 1"
+    if updated != 1:
+        raise RuntimeError(f"bug: delete_edge {op.op_id} marked {updated} rows, expected 1")
     store.log.record(LoggedOp.of(op, "applied", edge_id=edge.id))
     store.log.add_removals(op.op_id, [], [edge.id])  # after record: removed_edges.op_id -> ops
     return OpResult(op.op_id, "applied", edge_id=edge.id, removed_edges=1)

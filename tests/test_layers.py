@@ -14,7 +14,7 @@ ALLOWED = {
     "api": {"domain", "db"},
     "cli": {"api", "domain"},
 }
-SQL = re.compile(r"\b(SELECT|INSERT|UPDATE|DELETE FROM|CREATE)\b")
+SQL = re.compile(r"\b(SELECT\s.+\sFROM|INSERT\s+INTO|UPDATE\s+\w+\s+SET|DELETE\s+FROM|CREATE\s+(TABLE|INDEX|VIEW))\b", re.I | re.S)
 
 
 def modules():

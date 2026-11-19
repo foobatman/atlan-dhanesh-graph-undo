@@ -21,9 +21,11 @@ def handle(ctx: OpContext, op: DeleteNode) -> OpResult:
 
     # Edges before nodes: no statement leaves a live edge pointing at a dead node.
     flagged_edges = store.edges.mark_deleted(edge_ids, op.op_id)
-    assert flagged_edges == len(edge_ids), f"bug: flagged {flagged_edges} of {len(edge_ids)} edges"
+    if flagged_edges != len(edge_ids):
+        raise RuntimeError(f"bug: flagged {flagged_edges} of {len(edge_ids)} edges")
     flagged_nodes = store.nodes.mark_deleted(node_ids, op.op_id)
-    assert flagged_nodes == len(node_ids), f"bug: flagged {flagged_nodes} of {len(node_ids)} nodes"
+    if flagged_nodes != len(node_ids):
+        raise RuntimeError(f"bug: flagged {flagged_nodes} of {len(node_ids)} nodes")
 
     # Log row before removals: removed_*.op_id references ops(op_id).
     store.log.record(LoggedOp.of(op, "applied", node_id=root.id))

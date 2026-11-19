@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from graph_undo.api.registry import apply_op
+from graph_undo.db.connection import DbError
 from graph_undo.db.migrate import MigrationError, pending
 from graph_undo.db.store import Store
 from graph_undo.domain.errors import MalformedOp, OpError
@@ -47,17 +48,25 @@ def _decode(raw: bytes) -> object:
         raise MalformedOp(None, f"invalid JSON: {e.msg}") from None
     except ValueError as e:
         raise MalformedOp(None, str(e)) from None
+    except RecursionError:
+        raise MalformedOp(None, "invalid JSON: nested too deeply") from None
 
 
 def _open_store(db_path: Path) -> Store:
     if not db_path.is_file():
         raise ApplyError(f"no database at {db_path}; run: uv run load <seed.jsonl> --db {db_path}")
-    store = Store.open(db_path)
+    try:
+        store = Store.open(db_path)
+    except DbError as e:
+        raise ApplyError(f"{db_path}: cannot open database: {e}") from e
     try:
         todo = pending(store.con)
     except MigrationError as e:
         store.close()
         raise ApplyError(f"{db_path}: {e.message}") from e
+    except DbError as e:
+        store.close()
+        raise ApplyError(f"{db_path}: not a usable SQLite database: {e}") from e
     if todo:
         store.close()
         raise ApplyError(f"database needs migrations {todo}; run: uv run migrate --db {db_path}")
