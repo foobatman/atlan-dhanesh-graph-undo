@@ -93,6 +93,8 @@ Schema (migrations `src/graph_undo/db/migrations/0001_graph.sql` and `0002_oplog
 | `effective_tags` | view: `(node_id, tags)`, own tags ∪ every ancestor's along live `contains` |
 | `ops` (0002) | op log, one row per applied op: `seq` (apply order), `op_id`, `actor_kind`, `actor_name`, `op`, `effect` (`applied`/`noop`), `node_id`, `edge_id`, `before` (edit_node's previous values, JSON), `payload` (the op as received, compact sorted JSON) |
 | `removed_nodes`, `removed_edges` (0002) | what each delete op removed: `(op_id, node_id)` / `(op_id, edge_id)`, foreign keys to `ops`, `nodes`, `edges` |
+| `undos` (0003) | one row per undone op (`op_id` unique: an op is undone at most once): `undo_seq`, `op_id`, `after_seq` (last applied op when it ran), `report` (the JSONL printed) |
+| `undo_items` (0003) | the outcome of every removed item: `(op_id, kind node/edge, item_id)`, `outcome` (`restored`/`merged`/`skipped`), `reason_code`, `new_edge_id` (merged `contains` edges) |
 
 Full design: `docs/superpowers/specs/2026-11-19-load-design.md`.
 

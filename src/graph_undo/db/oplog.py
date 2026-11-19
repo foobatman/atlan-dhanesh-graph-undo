@@ -62,3 +62,19 @@ class OpLogRepo:
         edges = [r[0] for r in self.con.execute(
             "SELECT edge_id FROM removed_edges WHERE op_id = ? ORDER BY rowid", (op_id,))]
         return nodes, edges
+
+    def seq(self, op_id: str) -> int | None:
+        row = self.con.execute("SELECT seq FROM ops WHERE op_id = ?", (op_id,)).fetchone()
+        return None if row is None else row[0]
+
+    def last_op_id(self) -> str | None:
+        """The op_id with the highest seq, or None if nothing was applied."""
+        row = self.con.execute("SELECT op_id FROM ops ORDER BY seq DESC LIMIT 1").fetchone()
+        return None if row is None else row[0]
+
+    def creators(self, node_ids: list[str]) -> dict[str, tuple[str, str]]:
+        """node id -> (op_id, actor_kind) of the applied add_node that created it. Seed nodes are absent."""
+        rows = self.con.execute(
+            "SELECT node_id, op_id, actor_kind FROM ops WHERE op = 'add_node' AND effect = 'applied' "
+            "AND node_id IN (SELECT value FROM json_each(?))", (json.dumps(list(node_ids)),))
+        return {n: (o, k) for n, o, k in rows}

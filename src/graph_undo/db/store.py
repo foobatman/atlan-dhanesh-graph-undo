@@ -1,4 +1,4 @@
-"""Store: one connection plus the repositories (.nodes, .edges, .log). Also the bulk seed insert used by load."""
+"""Store: one connection plus the repositories (.nodes, .edges, .log, .undo_log). Also the bulk seed insert used by load."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from graph_undo.db.connection import connect
 from graph_undo.db.edges import EdgeRepo
 from graph_undo.db.nodes import NodeRepo
 from graph_undo.db.oplog import OpLogRepo
+from graph_undo.db.undolog import UndoLogRepo
 from graph_undo.domain.model import Node
 
 NAMESPACE = uuid.UUID("6f1c3a52-0d8e-4c1e-9b7a-2f4d5e6a7b8c")
@@ -23,6 +24,7 @@ class Store:
         self.nodes = NodeRepo(con)
         self.edges = EdgeRepo(con)
         self.log = OpLogRepo(con)
+        self.undo_log = UndoLogRepo(con)
 
     @classmethod
     def open(cls, path: str | Path) -> "Store":

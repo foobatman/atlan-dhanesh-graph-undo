@@ -87,7 +87,7 @@ def test_pending_migrations(db, tmp_path, capsys):
     connect(db).execute("PRAGMA user_version = 1")
     ops = write(tmp_path, [edit("op-0001", "conn/db/sc/t")])
     assert main([str(ops), "--db", str(db)]) == 1
-    assert capsys.readouterr().err == f"database needs migrations [2]; run: uv run migrate --db {db}\n"
+    assert capsys.readouterr().err == f"database needs migrations [2, 3]; run: uv run migrate --db {db}\n"
     assert connect(db).execute("SELECT owner FROM nodes WHERE id='t'").fetchone()[0] == "o"   # no op attempted
 
 

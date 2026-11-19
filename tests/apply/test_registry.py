@@ -288,7 +288,7 @@ def test_apply_file_refuses_to_run(store, tmp_path):
         apply_file(ops, tmp_path / "nope.db")
     assert not (tmp_path / "nope.db").exists()
     store.con.execute("PRAGMA user_version = 1")
-    with pytest.raises(ApplyError, match=r"database needs migrations \[2\]; run: uv run migrate --db "):
+    with pytest.raises(ApplyError, match=r"database needs migrations \[2, 3\]; run: uv run migrate --db "):
         apply_file(ops, db_path(store))
     store.con.execute("PRAGMA user_version = 99")
     with pytest.raises(ApplyError, match="newer"):

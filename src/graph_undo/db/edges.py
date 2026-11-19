@@ -50,3 +50,33 @@ class EdgeRepo:
             "WHERE deleted_by IS NULL AND id IN (SELECT value FROM json_each(?))",
             (op_id, json.dumps([int(i) for i in edge_ids])))
         return cur.rowcount
+
+    def by_ids(self, edge_ids: list[int]) -> list[Edge]:
+        """Rows (live or dead) for the given ids, ordered by id. Unknown ids are absent."""
+        rows = self.con.execute(
+            f"SELECT {_COLS} FROM edges WHERE id IN (SELECT value FROM json_each(?)) ORDER BY id",
+            (json.dumps([int(i) for i in edge_ids]),))
+        return [Edge(*r) for r in rows]
+
+    def revive(self, edge_ids: list[int], op_id: str) -> int:
+        """Make live again the given rows whose deleted_by is op_id. Returns the number of rows updated."""
+        cur = self.con.execute(
+            "UPDATE edges SET deleted_by = NULL "
+            "WHERE deleted_by = ? AND id IN (SELECT value FROM json_each(?))",
+            (op_id, json.dumps([int(i) for i in edge_ids])))
+        return cur.rowcount
+
+    def live_triples(self, triples: list[tuple[str, str, str]]) -> set[tuple[str, str, str]]:
+        """The given (from_id, to_id, type) triples that exist as live edges."""
+        rows = self.con.execute(
+            "SELECT e.from_id, e.to_id, e.type FROM edges e JOIN json_each(?) j "
+            "ON e.from_id = j.value->>0 AND e.to_id = j.value->>1 AND e.type = j.value->>2 "
+            "WHERE e.deleted_by IS NULL", (json.dumps([list(t) for t in triples]),))
+        return {tuple(r) for r in rows}
+
+    def live_parents(self, child_ids: list[str]) -> dict[str, Edge]:
+        """The live contains edge into each given child that has one, keyed by child id."""
+        rows = self.con.execute(
+            f"SELECT {_COLS} FROM edges WHERE type = 'contains' AND deleted_by IS NULL "
+            "AND to_id IN (SELECT value FROM json_each(?))", (json.dumps(list(child_ids)),))
+        return {e.to_id: e for e in (Edge(*r) for r in rows)}
