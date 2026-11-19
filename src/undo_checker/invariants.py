@@ -126,9 +126,11 @@ def inv5_effective_tags(d3: Dump, d4: Dump) -> Result:
 
 # --- 6: idempotent --------------------------------------------------------
 
-def inv6_idempotent(d3_text: str, d4_text: str) -> Result:
+def inv6_idempotent(d3_text: str, d4_text: str, undo2_stderr: str = "") -> Result:
+    first = next((l.strip() for l in undo2_stderr.splitlines() if l.strip()), "")
+    note = f" (second undo: {first})" if first else ""
     if d3_text == d4_text:
-        return Result("PASS", "D3 == D4")
+        return Result("PASS", f"D3 == D4{note}")
     a, b = d3_text.splitlines(), d4_text.splitlines()
     v = []
     for n in range(max(len(a), len(b))):
@@ -140,7 +142,7 @@ def inv6_idempotent(d3_text: str, d4_text: str) -> Result:
                 break
     if not v:
         v.append("D3 and D4 differ only in line endings")
-    return Result("FAIL", "second undo changed the dump", tuple(v))
+    return Result("FAIL", f"second undo changed the dump{note}", tuple(v))
 
 
 # --- 7, 8 -----------------------------------------------------------------
@@ -182,8 +184,12 @@ def inv1_frame(d2: Dump, d3: Dump, rem: Removed, ops_lines: list[dict]) -> Resul
     for e in sorted(d2.edges - d3.edges):
         v.append(f"edge {e} was live before undo and is gone after")
     added_nodes = set(d3.nodes) - set(d2.nodes)
-    for i in sorted(added_nodes - set(rem.nodes)):
-        v.append(f"node {_qn(d3, i)} added by undo but the delete never removed it")
+    for i in sorted(added_nodes):
+        if i not in rem.nodes:
+            v.append(f"node {_qn(d3, i)} added by undo but the delete never removed it")
+        elif fields(rem.nodes[i], COMPARE) != fields(d3.nodes[i], COMPARE):
+            diff = [k for k in COMPARE if fields(rem.nodes[i], (k,)) != fields(d3.nodes[i], (k,))]
+            v.append(f"node {_qn(d3, i)} restored but {', '.join(diff)} differs from before the delete")
     added_edges = d3.edges - d2.edges
     for e in sorted(added_edges - rem.edges):
         if not (e[2] == "contains" and e[1] in added_nodes):
@@ -194,16 +200,30 @@ def inv1_frame(d2: Dump, d3: Dump, rem: Removed, ops_lines: list[dict]) -> Resul
 
 # --- 2: eligible removed nodes restored intact (by name) -----------------
 
+KEYS = {"node": ("id",), "edge": ("from_id", "to_id", "type")}
+
+
+def _key_error(o: dict) -> str | None:
+    """Why a report line can't be matched to a removed item, or None."""
+    keys = KEYS.get(o.get("kind"))
+    if keys is None:
+        return f"kind {o.get('kind')!r} is not node or edge"
+    bad = [k for k in keys if not isinstance(o.get(k), str)]
+    return f"{', '.join(bad)} missing or not a string" if bad else None
+
+
 def _report_index(report) -> tuple[dict[str, dict], dict[tuple, dict]]:
     nodes, edges = {}, {}
     for line in report:
         o = line.obj
         if not o:
             continue
-        if o.get("kind") == "node" and "id" in o:
+        if _key_error(o) is not None:
+            continue
+        if o.get("kind") == "node":
             nodes.setdefault(o["id"], o)
         elif o.get("kind") == "edge":
-            edges.setdefault((o.get("from_id"), o.get("to_id"), o.get("type")), o)
+            edges.setdefault((o["from_id"], o["to_id"], o["type"]), o)
     return nodes, edges
 
 
@@ -248,7 +268,8 @@ def inv2_restored(d0: Dump, d2: Dump, d3: Dump, rem: Removed, report) -> Result:
 OUTCOMES = ("restored", "merged", "skipped")
 
 
-def inv4_report(report, rem: Removed, d3: Dump) -> Result:
+def inv4_report(report, rem: Removed, d3: Dump, d2: Dump | None = None) -> Result:
+    live_before = d2.edges if d2 is not None else frozenset()
     v = []
     if not report:
         v.append("report is empty")
@@ -260,8 +281,9 @@ def inv4_report(report, rem: Removed, d3: Dump) -> Result:
             continue
         o = line.obj
         kind, outcome = o.get("kind"), o.get("outcome")
-        if kind not in ("node", "edge"):
-            v.append(f"report line {line.lineno}: kind {kind!r} is not node or edge")
+        err = _key_error(o)
+        if err:
+            v.append(f"report line {line.lineno}: {err}")
             continue
         if outcome not in OUTCOMES:
             v.append(f"report line {line.lineno}: outcome {outcome!r} is not one of {', '.join(OUTCOMES)}")
@@ -274,13 +296,22 @@ def inv4_report(report, rem: Removed, d3: Dump) -> Result:
                 v.append(f"node {i} reported restored but not live after undo")
             if outcome == "skipped" and i in d3.nodes:
                 v.append(f"node {i} reported skipped but live after undo")
+            if outcome == "merged":
+                v.append(f"node {i} reported merged; nodes are restored or skipped, never merged")
         else:
             e = (o.get("from_id"), o.get("to_id"), o.get("type"))
             edge_count[e] = edge_count.get(e, 0) + 1
             if outcome == "restored" and e not in d3.edges:
                 v.append(f"edge {e} reported restored but not live after undo")
-            if outcome == "merged" and (e[1] not in d3.nodes or e[1] not in d3.parent):
-                v.append(f"edge {e} reported merged but child {e[1]} has no contains parent after undo")
+            if outcome == "skipped" and e in d3.edges and e not in live_before:
+                v.append(f"edge {e} reported skipped but live after undo")
+            if outcome == "merged":
+                if e[2] != "contains":
+                    v.append(f"edge {e} reported merged, but only contains edges can be merged")
+                elif e in d3.edges:
+                    v.append(f"edge {e} reported merged but its original triple is live after undo")
+                elif e[1] not in d3.nodes or e[1] not in d3.parent:
+                    v.append(f"edge {e} reported merged but child {e[1]} has no contains parent after undo")
     for i, k in sorted(node_count.items(), key=lambda kv: str(kv[0])):
         if k > 1:
             v.append(f"node {i} reported {k} times")

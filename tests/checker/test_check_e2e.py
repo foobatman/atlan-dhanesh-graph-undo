@@ -39,7 +39,7 @@ def test_real_run_passes_all(real):
     t, art, d0, d2, d3, rem = real
     rep = parse_report(art.report)
     for r in (inv.inv1_frame(d2, d3, rem, t.ops_lines), inv.inv2_restored(d0, d2, d3, rem, rep),
-              inv.inv3_unique(d3, d3), inv.inv4_report(rep, rem, d3), inv.inv5_effective_tags(d3, d3)):
+              inv.inv3_unique(d3, d3), inv.inv4_report(rep, rem, d3, d2), inv.inv5_effective_tags(d3, d3)):
         assert r.status == "PASS", r.violations[:5]
 
 

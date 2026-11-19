@@ -198,12 +198,12 @@ An independent witness for undo. It runs the tool as a black box through its CLI
 | 11 | `dump` | `D4.jsonl`: after the second undo |
 
 - **Removed set:** D0 − D1. Before any invariant is checked, a guard confirms that it is exactly the target's `contains` subtree plus every edge touching it, and that nothing else changed.
-- **1:** frame check. Every node and edge in D2 is unchanged in D3. Anything new is a removed item, or a `contains` edge into a restored node.
+- **1:** frame check. Every node and edge in D2 is unchanged in D3. Anything new is a removed item, with the fields it had before the delete, or a `contains` edge into a restored node.
 - **2:** by name. A removed node whose name is free in D2, and whose original parent's name is held in D3 by a node of the same type (or which had no parent), must be in D3 with its id and authored fields, under that holder, and its report line must say `restored`. Zero such nodes is a failure (`vacuous`).
 - **3:** unique names in D3 and D4.
-- **4:** the report lists every removed node id and edge triple exactly once, with valid outcomes and reasons, and the outcomes agree with D3.
+- **4:** the report lists every removed node id and edge triple exactly once, with valid outcomes and reasons, and the outcomes agree with D3. Nodes are never `merged`. A `merged` edge is a `contains` edge whose original triple is not live, and whose child has a parent. A `skipped` edge is not live, unless it already was before undo.
 - **5:** no dangling edges, at most one parent per node, no cycles, and `effective_tags` recomputed from D3/D4.
-- **6:** D3 and D4 are byte-identical.
+- **6:** D3 and D4 are byte-identical. The second undo's first stderr line is shown for information.
 - **7:** skipped; not covered by this checker.
 - **8:** steps 1, 2, 4, 6, 8 and 9 (load, a full apply, undo, dump) take under 60 s.
 
@@ -215,7 +215,7 @@ Seed 42, against the undo branch:
 3 PASS  2495 names unique
 4 PASS  614 nodes, 774 edges, each reported once
 5 PASS  2495 nodes
-6 PASS  D3 == D4
+6 PASS  D3 == D4 (second undo: op-0001 already_undone: already undone (undo #1, after op-0309); …)
 7 SKIP  not covered by this checker
 8 PASS  scenario 0.4 s (checker total 0.9 s)
 check op-0001: 7 passed, 0 failed, 1 skipped

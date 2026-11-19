@@ -51,9 +51,9 @@ def _check(seed: Path, ops: Path, op_id: str, workdir: Path, t0: float) -> list[
         (1, inv.inv1_frame(d2, d3, rem, target.ops_lines)),
         (2, inv.inv2_restored(d0, d2, d3, rem, report)),
         (3, inv.inv3_unique(d3, d4)),
-        (4, inv.inv4_report(report, rem, d3)),
+        (4, inv.inv4_report(report, rem, d3, d2)),
         (5, inv.inv5_effective_tags(d3, d4)),
-        (6, inv.inv6_idempotent(art.d3, art.d4)),
+        (6, inv.inv6_idempotent(art.d3, art.d4, art.undo2_stderr or "")),
         (7, inv.INV7),
         (8, inv.inv8_timing(run.scenario_seconds(art), time.perf_counter() - t0)),
     ]

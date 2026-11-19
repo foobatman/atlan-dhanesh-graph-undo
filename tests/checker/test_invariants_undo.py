@@ -217,3 +217,46 @@ def test_inv4_garbage_lines():
     assert r.status == "FAIL"
     assert any(v.startswith("report line 10:") for v in r.violations)
     assert any(v.startswith("report line 11:") for v in r.violations)
+
+
+# --- final-review fixes ---
+
+def test_inv4_unhashable_ids_do_not_crash():
+    items = [dict(GOOD[0], id=["s"])] + GOOD[1:] + [dict(GOOD[4], from_id={"x": 1})]
+    r = inv4_report(rep(items), REM, D3, D2)
+    assert r.status == "FAIL"
+    assert any(v.startswith("report line 1:") and "id" in v for v in r.violations)
+    assert inv2_restored(D0, D2, D3, REM, rep(items)).status in ("PASS", "FAIL")
+
+
+def test_inv4_skipped_edge_but_live():
+    items = [edge("t1", "c1", "contains", "skipped", "no") if i.get("to_id") == "c1" else i for i in GOOD]
+    r = inv4_report(rep(items), REM, D3, D2)
+    assert r.status == "FAIL" and any("skipped but live" in v for v in r.violations)
+
+
+def test_inv4_merged_edge_but_original_live():
+    items = [edge("t1", "c1", "contains", "merged", "moved") if i.get("to_id") == "c1" else i for i in GOOD]
+    r = inv4_report(rep(items), REM, D3, D2)
+    assert r.status == "FAIL" and any("merged but its original triple is live" in v for v in r.violations)
+
+
+def test_inv4_merged_references_edge():
+    items = [edge("r", "t1", "references", "merged", "x") if i.get("type") == "references" else i for i in GOOD]
+    r = inv4_report(rep(items), REM, D3, D2)
+    assert r.status == "FAIL" and any("references" in v and "merged" in v for v in r.violations)
+
+
+def test_inv4_node_merged():
+    items = [dict(GOOD[0], outcome="merged")] + GOOD[1:]
+    r = inv4_report(rep(items), REM, D3, D2)
+    assert r.status == "FAIL" and any("node s" in v and "merged" in v for v in r.violations)
+
+
+def test_inv1_added_node_fields_changed():
+    # t2 is not eligible (its name is held), but suppose undo restored it with an altered owner
+    # under a fresh parent: the row must still be the original.
+    t2_bad = dict(T2, qualified_name="c/d/s/t2-x", owner="mallory")
+    d3 = d([DB, X, R_EDITED, S2, T2B, T1, C1, t2_bad], D2_EDGES + RESTORED_EDGES + [("s2", "t2", "contains")])
+    r = inv1_frame(D2, d3, REM, OPS)
+    assert r.status == "FAIL" and any("t2" in v and "differs from before the delete" in v for v in r.violations)

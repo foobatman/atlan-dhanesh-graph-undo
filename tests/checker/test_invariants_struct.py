@@ -113,3 +113,8 @@ def test_inv8_under():
 
 def test_inv8_over():
     assert inv8_timing(60.0, 61.0).status == "FAIL"
+
+
+def test_inv6_prints_second_undo_stderr_line():
+    r = inv6_idempotent(D0.text, D0.text, "op-0001 already_undone: already undone\nmore\n")
+    assert r.summary == "D3 == D4 (second undo: op-0001 already_undone: already undone)"
