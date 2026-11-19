@@ -20,12 +20,14 @@ OWNERS = ["alice", "bob", "carol", "dave", "erin", "frank", "grace", "heidi"]
 
 DATABASES_PER_CONNECTION = 2
 SCHEMAS_PER_DATABASE = 3
-TABLES_RANGE = (15, 21)
-COLUMNS_RANGE = (5, 12)
+# Narrow ranges keep totals inside the spec's bands for any seed (~2,510 nodes, sd ~17).
+TABLES_RANGE = (18, 18)
+COLUMNS_RANGE = (7, 10)
+BIG_COLUMNS_RANGE = (8, 10)  # floor: 61 x (1 + 8) + 1 = 550, so the big schema is >= 550 by construction
 REFERENCES_TOTAL = 300
 REFERENCES_INBOUND = 40   # other table -> big-schema table
 REFERENCES_OUTBOUND = 40  # big-schema table -> other table
-BIG_SCHEMA_TABLES = 62  # ~62 x 9.5 nodes/table => subtree comfortably >= 550
+BIG_SCHEMA_TABLES = 61
 
 TAGS = ["certified", "deprecated", "finance", "gold", "marketing", "pii", "silver"]
 # Weights for drawing 0, 1 or 2 own tags, per node type.
@@ -116,7 +118,8 @@ def generate_seed(seed: int) -> tuple[list[dict], list[dict]]:
                 for table_name in _unique_names(rng, TABLE_WORDS, n_tables):
                     table = add("table", table_name, schema)
                     (big_tables if is_big else other_tables).append(table)
-                    for col_name in _unique_names(rng, COLUMN_WORDS, rng.randint(*COLUMNS_RANGE)):
+                    n_cols = rng.randint(*(BIG_COLUMNS_RANGE if is_big else COLUMNS_RANGE))
+                    for col_name in _unique_names(rng, COLUMN_WORDS, n_cols):
                         add("column", col_name, table)
     edges.extend(_references(rng, big_tables, other_tables))
     return nodes, edges

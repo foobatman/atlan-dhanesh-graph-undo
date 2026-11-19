@@ -3,9 +3,13 @@ import pytest
 from graph_undo.fixture import generate_seed
 
 
-@pytest.fixture(scope="module")
-def graph():
-    return generate_seed(42)
+# 42 is the default; the others include seeds the review found off-spec (6, 61, 101, 252).
+SEEDS = [0, 1, 6, 7, 42, 61, 101, 252, 2**64]
+
+
+@pytest.fixture(scope="module", params=SEEDS, ids=lambda s: f"seed{s}")
+def graph(request):
+    return generate_seed(request.param)
 
 
 def by_id(nodes):

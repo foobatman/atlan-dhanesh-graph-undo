@@ -64,9 +64,9 @@ Node `type` values (the brief leaves them open; our call): `connection → datab
 | connections | 2 |
 | databases per connection | 2 |
 | schemas per database | 3 (12 total) |
-| tables per schema | ~15–21 (seeded) |
-| columns per table | ~5–12 (seeded) |
-| **big schema** | one schema forced to ~62 tables, so its subtree is **≥ 550 nodes** (margin over 500) |
+| tables per schema | 18 (fixed, keeps totals in band for every seed) |
+| columns per table | 7–10 (seeded); 8–10 in the big schema |
+| **big schema** | one schema forced to 61 tables, so its subtree is **≥ 550 nodes by construction** (61 × 9 + 1) |
 
 Target totals (asserted): ~2,400–2,600 nodes, contains edges = nodes − 2, ~300 references edges, **total lines 4,500–5,500**. Builder may tune fan-out constants to hit these.
 
