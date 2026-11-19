@@ -2,20 +2,6 @@
 
 Undo for subtree deletes on a small SQLite-backed graph. The brief is in [problem.md](problem.md).
 
-## Status
-
-| Part | State |
-|---|---|
-| Seed fixture generator (`seed.jsonl`) | done |
-| Ops fixture generator (`ops.jsonl`) | done |
-| `load` (seed → SQLite) | done |
-| `migrate` (schema migrations) | done |
-| `apply` foundation (parse, errors, op log, registry, CLI) | done |
-| `apply` op handlers (`add_node`, `edit_node`, `delete_node`, `add_edge`, `delete_edge`) | done |
-| `dump` (live graph as sorted JSONL) | done |
-| `undo` | in progress (separate session) |
-| Checker | not started |
-
 ## Setup
 
 Requires [uv](https://docs.astral.sh/uv/) and Python ≥ 3.11. Every command runs through `uv run`, so no virtualenv activation is needed.
@@ -23,6 +9,29 @@ Requires [uv](https://docs.astral.sh/uv/) and Python ≥ 3.11. Every command run
 ```sh
 uv sync
 ```
+
+## Quickstart
+
+The four commands from [problem.md](problem.md), run on the seed-42 fixture. Each one is covered in detail further down.
+
+```sh
+uv run gen-fixture                        # writes fixtures/seed.jsonl and fixtures/ops.jsonl
+uv run load fixtures/seed.jsonl           # load: create ./graph.db from the seed
+uv run apply fixtures/ops.jsonl           # apply: run all 309 ops in order (op-0001 deletes postgres/ops/core)
+uv run dump > before-undo.jsonl           # dump: the live graph as sorted JSONL
+# uv run undo op-0001                     # undo: not built yet (see Status); will print the JSON report
+# uv run dump > after-undo.jsonl
+```
+
+Expected stderr from the first steps:
+
+```
+wrote fixtures/seed.jsonl: nodes=2503 edges=2801 big_schema=postgres/ops/core big_size=614 ops=309 recreated=77
+loaded graph.db: nodes=2503 edges=2801
+applied fixtures/ops.jsonl to graph.db: applied=302 noop=7 skipped=0 rejected=0
+```
+
+`load`, `apply` and `dump` take `--db PATH` to work on a file other than `./graph.db`.
 
 ## Generate the fixture
 
@@ -214,3 +223,17 @@ tests/                         pytest suite
 docs/superpowers/specs/     design specs
 docs/superpowers/plans/     implementation plans
 ```
+
+## Status
+
+| Part | State |
+|---|---|
+| Seed fixture generator (`seed.jsonl`) | done |
+| Ops fixture generator (`ops.jsonl`) | done |
+| `load` (seed → SQLite) | done |
+| `migrate` (schema migrations) | done |
+| `apply` foundation (parse, errors, op log, registry, CLI) | done |
+| `apply` op handlers (`add_node`, `edit_node`, `delete_node`, `add_edge`, `delete_edge`) | done |
+| `dump` (live graph as sorted JSONL) | done |
+| `undo` | in progress (separate session) |
+| Checker | not started |
