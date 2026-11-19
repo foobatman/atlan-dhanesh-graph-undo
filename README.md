@@ -171,7 +171,7 @@ Prints the **live** graph as JSONL on stdout, using the same compact, sorted-key
 {"from_id":"…","to_id":"…","type":"contains"}
 ```
 
-**Read-only.** The db is opened with `mode=ro` and read in one transaction, so a dump never changes the file and always shows one consistent moment, even next to a crashed undo. It exits 1 with a message, and no output, if the db is missing, isn't SQLite, has pending migrations or is newer than the code.
+**Read-only.** The db is opened with `mode=ro` and read in one transaction, so a dump issues no writes and always shows one consistent moment. If a writer such as `undo` crashed mid-transaction and left a hot journal, dump reopens the db normally so SQLite's crash recovery rolls back to the last commit, and prints that state. That's the dump invariant 7 asks for between a crashed and a resumed undo. It exits 1 with a message, and no output, if the db is missing, isn't SQLite, has pending migrations or is newer than the code.
 
 ## Known limitation: undo of undo is not supported
 

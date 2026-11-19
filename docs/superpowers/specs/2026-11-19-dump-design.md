@@ -48,6 +48,8 @@ Example:
 ## Behaviour
 
 - **Read-only.** The db is opened with a URI of the form `file:<path>?mode=ro`. Dump reads all rows inside one `BEGIN` (deferred) … `COMMIT` read transaction, so it sees one consistent snapshot even while another process writes.
+- **After a crashed writer.** If a writer died mid-transaction, it leaves a hot journal, and a `mode=ro` connection can't read at all (SQLITE_READONLY_ROLLBACK). Dump then reopens the db normally, so SQLite's own crash recovery rolls the database back to its last commit; that's the state dump prints. Dump itself never issues a write. This is required by invariant 7: a dump taken between a crashed undo and its re-run must work. Added after the final review.
+- **Version check inside the snapshot.** `user_version` is read inside the same read transaction as the rows. If it changed since the migration check, dump fails with exit 1.
 - **Output.** stdout gets the JSONL lines only. Nothing goes to stderr on success. Exit 0.
 - **Exit 1** with a plain stderr message, and no output, when:
   - the db is missing;

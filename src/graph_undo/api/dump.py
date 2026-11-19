@@ -7,7 +7,7 @@ from pathlib import Path
 
 from graph_undo.db.connection import DbError, connect_readonly
 from graph_undo.db.dump import live_graph
-from graph_undo.db.migrate import MigrationError, pending
+from graph_undo.db.migrate import LATEST, MigrationError, pending
 
 
 class DumpError(Exception):
@@ -31,11 +31,13 @@ def dump_lines(db_path: str | Path) -> list[str]:
         todo = pending(con)
         if todo:
             raise DumpError(f"database needs migrations {todo}; run: uv run migrate --db {db_path}")
-        nodes, edges = live_graph(con)
+        version, nodes, edges = live_graph(con)
+        if version != LATEST:      # migrated between the check and the read
+            raise DumpError(f"{db_path}: schema version changed to {version} while dumping; run dump again")
     except MigrationError as e:
         raise DumpError(f"{db_path}: {e.message}") from e
     except DbError as e:
-        raise DumpError(f"{db_path}: not a usable SQLite database: {e}") from e
+        raise DumpError(f"{db_path}: cannot read database: {e}") from e
     finally:
         con.close()
     # re-sort in Python: byte order independent of SQLite collation
