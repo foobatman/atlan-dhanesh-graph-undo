@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
+from typing import Literal
 
 NODE_TYPES = ("connection", "database", "schema", "table", "column")
 EDGE_TYPES = ("contains", "references")
@@ -26,3 +27,18 @@ class Node:
     owner: str
     tags: tuple[str, ...]
     deleted_by: str | None = None
+
+
+@dataclass(frozen=True)
+class Edge:
+    id: int
+    from_id: str
+    to_id: str
+    type: str
+    deleted_by: str | None = None
+
+
+@dataclass(frozen=True)
+class Actor:
+    kind: Literal["human", "ingest"]
+    name: str
