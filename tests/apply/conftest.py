@@ -53,3 +53,58 @@ def store(tmp_path):
     s = load_store(tmp_path)
     yield s
     s.close()
+
+
+# ---- helpers (plain functions; import them from apply.conftest) ----
+
+DEFAULT_OP_ID = "op-0100"
+DEFAULT_ACTOR = {"kind": "human", "name": "ann"}
+OP_KINDS = ("add_node", "edit_node", "delete_node", "add_edge", "delete_edge")
+
+
+def op_dict(**fields) -> dict:
+    """An op dict with a default op_id ("op-0100") and actor (human "ann"); `fields` override them.
+    Use **{"from": ...} for the edge endpoints."""
+    return {"op_id": DEFAULT_OP_ID, "actor": dict(DEFAULT_ACTOR), **fields}
+
+
+def run(store: Store, **fields):
+    """parse_op + apply_op for one op built by op_dict(**fields). Returns the OpResult or raises the OpError."""
+    from graph_undo.api.registry import apply_op
+    from graph_undo.domain.ops import parse_op
+
+    return apply_op(store, parse_op(op_dict(**fields)))
+
+
+def live_names(store: Store) -> set[str]:
+    return {r[0] for r in store.con.execute("SELECT qualified_name FROM live_nodes")}
+
+
+def log_row(store: Store, op_id: str):
+    """The LoggedOp for op_id, or None."""
+    return store.log.get(op_id)
+
+
+def snapshot(store: Store) -> dict:
+    """Every row of every table (plus user_version), for "nothing changed" assertions."""
+    con = store.con
+    tables = [r[0] for r in con.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")]
+    out = {t: con.execute(f"SELECT * FROM {t} ORDER BY rowid").fetchall() for t in tables}
+    out["user_version"] = con.execute("PRAGMA user_version").fetchone()[0]
+    return out
+
+
+def is_stub(kind: str) -> bool:
+    """True while graph_undo.api.<kind> is still the foundation stub (STUB = True) or is not registered."""
+    from graph_undo.api.registry import HANDLERS
+
+    mod = importlib.import_module(f"graph_undo.api.{kind}")
+    return getattr(mod, "STUB", False) or kind not in HANDLERS
+
+
+def requires(*kinds: str) -> None:
+    """Call at the top of a test that needs other op handlers: skips it while any of them is a stub."""
+    missing = [k for k in kinds if is_stub(k)]
+    if missing:
+        pytest.skip(f"handler not implemented yet: {', '.join(missing)}")

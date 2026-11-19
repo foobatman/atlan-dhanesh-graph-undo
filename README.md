@@ -9,7 +9,10 @@ Undo for subtree deletes on a small SQLite-backed graph. The brief is in [proble
 | Seed fixture generator (`seed.jsonl`) | done |
 | Ops fixture generator (`ops.jsonl`) | done |
 | `load` (seed → SQLite) | done |
-| `apply` / `undo` / `dump` | not started |
+| `migrate` (schema migrations) | done |
+| `apply` foundation (parse, errors, op log, registry, CLI) | done |
+| `apply` op handlers (`add_node`, `edit_node`, `delete_node`, `add_edge`, `delete_edge`) | pending (stubs) |
+| `undo` / `dump` | not started |
 | Checker | not started |
 
 ## Setup
@@ -102,6 +105,43 @@ uv run migrate --db PATH
 
 The schema is a numbered list of SQL files in `src/graph_undo/db/migrations/` (`NNNN_<name>.sql`, gap-free, never edited once committed). `PRAGMA user_version` holds the last one applied, and only the in-house runner (`db/migrate.py`, stdlib only) sets it. `load` always builds a db at the latest version. `migrate` upgrades an older db in place, one transaction per migration, and prints `migrated graph.db: 1 -> 2` or `graph.db is up to date (2)`. It exits 1 if the db is missing or newer than the code. No command migrates implicitly.
 
+## Apply ops
+
+```sh
+uv run apply fixtures/ops.jsonl              # applies to ./graph.db
+uv run apply fixtures/ops.jsonl --db PATH
+```
+
+Each op is parsed (`parse_op`: shape only), then applied in **its own transaction** by the handler for its kind. Every applied op gets one row in `ops`; deletes also write `removed_nodes` / `removed_edges`. An invalid op is rolled back, printed to stderr and skipped, and the run continues:
+
+```
+fixtures/ops.jsonl:17: op-0017 node_not_found: node 'conn/db/x' is not a live node
+applied fixtures/ops.jsonl to graph.db: applied=303 noop=6 skipped=0 rejected=0
+```
+
+- Everything after `<line>: ` is exactly `str(OpError)` (`<op_id> <code>: <message>`, or `<code>: <message>` when the line has no usable `op_id`), the same text any caller of the API gets for that op. Line numbers count `\n` only; blank lines are ignored.
+- The summary line is always printed. **Exit 0 whenever the file was processed, even with rejected ops.**
+- Exit 1, with no op attempted, only when apply cannot run: the ops file is missing or unreadable, the db is missing, the db has pending migrations (`database needs migrations [2]; run: uv run migrate --db graph.db`) or is newer than the code.
+- **Re-runs:** an `op_id` already in `ops` with the same payload is `skipped`; with a different payload it is rejected as `op_id_conflict`. Rejected ops are never logged, so a re-run tries them again.
+- New node ids are `uuid5(6f1c3a52-0d8e-4c1e-9b7a-2f4d5e6a7b8c, op_id)`, so the same seed and ops give the same db, ids included.
+
+**Status:** the foundation (parsing, errors, op log, registry, `apply_file`, CLI) is done. The five op handlers in `src/graph_undo/api/<op>.py` are still stubs (`STUB = True`, raising `NotImplementedError`), so applying the real fixture fails on its first op until they land.
+
+| code | raised when |
+|---|---|
+| `malformed` | bad JSON, not an object, wrong/missing/extra keys, wrong types, unknown `op` or `type`, bad `op_id` |
+| `actor_not_allowed` | ingest sends `edit_node`, `delete_node` or `delete_edge`, or authored fields on `add_node` |
+| `node_not_found` | a `node`/`parent`/`from`/`to` name is not live |
+| `name_taken` | human `add_node` of a live name |
+| `type_order` | a `contains` edge (or `add_node` parent) is not exactly one level down |
+| `self_loop` | `from == to` |
+| `duplicate_edge` | the live edge `(from, to, type)` already exists |
+| `already_has_parent` | `add_edge contains` onto a child that has a live parent |
+| `edge_not_found` | `delete_edge` of an edge that isn't live |
+| `op_id_conflict` | the `op_id` is already logged with a different payload |
+
+Full design: `docs/superpowers/specs/2026-11-19-apply-foundation-design.md` and the per-op specs `2026-11-19-op-*-design.md`.
+
 ## Known limitation: undo of undo is not supported
 
 `undo <op_id>` is designed for **delete ops** (`delete_node`, `delete_edge`) recorded by `apply`. Undoing an undo, which amounts to redo, is **not supported, and adding it is not trivial**:
@@ -129,9 +169,15 @@ src/graph_undo/fixture/cli.py   gen-fixture CLI
 src/graph_undo/domain/          pure Python graph values (no I/O, no sqlite3)
 src/graph_undo/db/              the only package with SQL: connection, migrations, Store (.nodes, .edges, .log repositories)
 src/graph_undo/db/migrations/   numbered schema migrations (0001 graph tables + views, 0002 op log + removals)
-src/graph_undo/api/             graph rules; load.py = seed parsing/validation + atomic db swap
-src/graph_undo/cli/             entry points: load, migrate
+src/graph_undo/domain/ops.py    typed ops, parse_op, canonical(); domain/errors.py: OpError classes
+src/graph_undo/db/nodes.py, edges.py, oplog.py   NodeRepo, EdgeRepo, OpLogRepo (+ LoggedOp)
+src/graph_undo/api/             graph rules: load.py (seed), registry.py (HANDLERS, apply_op), apply.py (apply_file)
+src/graph_undo/api/<op>.py      one handler per op kind (currently stubs)
+src/graph_undo/api/resolve.py   require_live(ctx, field, qn): shared name resolution
+src/graph_undo/cli/             entry points: load, migrate, apply
 tests/replay.py                independent replay of seed + ops, used by the tests
+tests/apply/                   apply tests; conftest.py has store, run, live_names, log_row, snapshot, requires
+tests/test_layers.py           enforces cli -> api -> db -> domain and no SQL outside db/
 tests/                         pytest suite
 docs/superpowers/specs/     design specs
 docs/superpowers/plans/     implementation plans
