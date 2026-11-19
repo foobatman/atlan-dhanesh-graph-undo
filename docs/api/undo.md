@@ -7,6 +7,8 @@ Reverses one applied `delete_node` or `delete_edge`, working on the graph as it 
 
 **Each op can be undone once.** A second attempt changes nothing and fails with `already_undone`. The whole undo runs in one transaction.
 
+**When undoing several deletes, undo the later ones first.** Say a later delete Z removed an endpoint or parent of an item, so the item was skipped (`endpoint_deleted` or `no_live_parent`). That skip is final: undoing Z afterwards won't bring the item back. The reason text says so: `endpoint t was deleted by op-0247 (undo op-0247 first to restore this)`.
+
 ## CLI
 
 ```sh

@@ -56,7 +56,7 @@ For each node n, the first rule that matches decides its outcome:
    - **b. Original parent is live:** p is live now (outside N and never deleted, or restored earlier in this undo). n is **restored** under p, and its original edge is restored in phase 2.
    - **c. Holder of the parent's name:** p was **held by** h (rule 1), or p is dead outside N and a live node h holds p's name. If `h.type == p.type`, n is **restored** under h, and phase 2 creates a new `contains` edge h → n.
    - **d. Holder has a different type:** a holder exists but its type differs. n is **skipped**, `parent_type_mismatch`: "parent `<p.qn>` is held by `<h.id>` of type `<h.type>`, not `<p.type>`".
-   - **e. No parent:** n is **skipped**, `no_live_parent`: "parent `<p.qn>` was not restored (`<p's reason code>`)", or "… was deleted by `<op>`" if p is outside N.
+   - **e. No parent:** n is **skipped**, `no_live_parent`: "parent `<p.qn>` was not restored (`<p's reason code>`)", or "… was deleted by `<op>` (undo `<op>` first to restore this)" if p is outside N. This skip is final, so later deletes should be undone first.
 
 A skipped node's children are still checked one by one. Rule 2c means the children of a `name_held` node move to its holder, so the cascade that skips whole subtrees is 2d/2e.
 
@@ -73,7 +73,7 @@ Each edge e in E is decided once phase 1 is complete:
 | `contains` p → c | c skipped | **skipped**, `endpoint_not_restored`: "child `<c.qn>` was skipped (`<code>`)" |
 | `references` a → b | both endpoints live after phase 1, and no live `(a, b, references)` edge | **restored** |
 | `references` a → b | an endpoint in N was skipped | **skipped**, `endpoint_not_restored`: "endpoint `<qn>` was skipped (`<code>`)" |
-| `references` a → b | an endpoint outside N is dead | **skipped**, `endpoint_deleted`: "endpoint `<qn>` was deleted by `<op_id>`" |
+| `references` a → b | an endpoint outside N is dead | **skipped**, `endpoint_deleted`: "endpoint `<qn>` was deleted by `<op_id>` (undo `<op_id>` first to restore this)" |
 | `references` a → b | a live duplicate exists | **skipped**, `duplicate_edge`. This can't happen after a `delete_node`, but it's handled for `delete_edge`. |
 
 References are never redirected to the node that holds a name. E1's human edge X → T′ stays as it is, and the original X → T is skipped.

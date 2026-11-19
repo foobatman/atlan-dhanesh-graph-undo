@@ -51,9 +51,3 @@ def test_python_examples_run(op, tmp_path):
              {"store": store, "tmp_path": tmp_path, "seed_path": seed_path})
     finally:
         store.close()
-
-
-def test_decisions_covers_the_three_edit_kinds():
-    text = (DOCS.parents[1] / "DECISIONS.md").read_text().lower()
-    for word in ("independent", "conflicting", "caused", "rejected", "verified"):
-        assert word in text

@@ -115,7 +115,7 @@ def test_three_level_cascade():
     assert r[5] == "recreated as orders2 → total"
     assert r[3] == "recreated as core2 → users"
     assert r[7] == "endpoint pg/ops/core/orders was skipped (name_held)"
-    assert r[8] == "endpoint fin/ledger was deleted by op-0207"
+    assert r[8] == "endpoint fin/ledger was deleted by op-0207 (undo op-0207 first to restore this)"
     assert r["users"] is None and r[6] is None
 
 
@@ -148,7 +148,7 @@ def test_outside_parent_dead_no_holder():
     plan = plan_undo(inputs(TREE, TREE_EDGES, others=[dead_p]))
     nodes, edges = outcomes(plan)
     assert nodes["core"] == ("skipped", "no_live_parent", None)
-    assert reasons(plan)["core"] == "parent pg/ops was deleted by op-0300"
+    assert reasons(plan)["core"] == "parent pg/ops was deleted by op-0300 (undo op-0300 first to restore this)"
     assert nodes["orders"] == ("skipped", "no_live_parent", None)
     assert reasons(plan)["orders"] == "parent pg/ops/core was not restored (no_live_parent)"
     assert all(o[0] == "skipped" for o in edges.values())
@@ -184,7 +184,7 @@ def test_delete_edge_undo():
     gone = N("u", "s/u", "table", deleted_by="op-0050")
     plan = plan_undo(inputs([], [ref], others=[t, gone], root=None, op="delete_edge"))
     assert outcomes(plan)[1] == {10: ("skipped", "endpoint_deleted", None)}
-    assert reasons(plan)[10] == "endpoint s/u was deleted by op-0050"
+    assert reasons(plan)[10] == "endpoint s/u was deleted by op-0050 (undo op-0050 first to restore this)"
 
 
 def test_unreachable_removed_node_is_a_bug():

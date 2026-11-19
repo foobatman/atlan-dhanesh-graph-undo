@@ -88,7 +88,7 @@ def test_endpoint_deleted(store):
     result = undo_op(store, "op-0100")
     assert short(result) == {("node", "u"): ("restored", None), ("edge", 4): ("restored", None),
                              ("edge", 6): ("skipped", "endpoint_deleted")}
-    assert report(result)[("edge", 6)]["reason"] == "endpoint conn/db/sc/t was deleted by op-0101"
+    assert report(result)[("edge", 6)]["reason"] == "endpoint conn/db/sc/t was deleted by op-0101 (undo op-0101 first to restore this)"
 
 
 def test_undo_delete_edge(store):

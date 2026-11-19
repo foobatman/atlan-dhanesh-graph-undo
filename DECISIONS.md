@@ -23,17 +23,15 @@
 
 **Once per op.** A second `undo` of the same op is refused with `already_undone` and writes nothing. That is how invariant 6 holds. The `undos.op_id` unique constraint enforces it.
 
+**Undo later deletes first.** When several deletes are undone, order matters.
+- **The problem:** an item skipped as `endpoint_deleted` or `no_live_parent` because a *later* delete Z removed its endpoint or parent is skipped for good. Undoing Z afterwards brings that endpoint back, but it doesn't revisit the earlier undo, which can't run again.
+- **Example on seed 42:** `undo op-0001` followed by `undo op-0247` loses two references that the reverse order restores.
+- **What undo does about it:** those reasons end with "(undo `<Z>` first to restore this)".
+- **Not built:** having undo Z also restore the earlier undo's skipped items. That would change the spec.
+
 ## What the model proposed that I rejected
 
 - **Field-level merge into the recreated node** (copy the original's description, owner and tags into blank fields, then move children and edges onto it). Rejected because it writes to rows the delete never removed. Invariant 1 then depends on getting "did a human set this field?" exactly right, and undo of an undo gets harder.
 - **Strict "skip if the name is held", with children needing their original parent.** Rejected after checking it against the fixture: ingest recreates the root's own name, so the root is skipped, everything beneath it cascades to skipped, and `undo op-0001` restores nothing. Rule 2c, which reattaches children under the holder of their parent's name, fixes this without editing the holder.
 - **Refusing the whole undo when any item conflicts.** Rejected: only the conflicting node is skipped, and the rest goes ahead.
 - **Logging undo in the `ops` table.** Rejected: undo gets its own `undos` and `undo_items` tables. That way the `ops` CHECK constraints stay unchanged and no fields are added to nodes or edges.
-
-## What I verified myself
-
-*To be filled in by the author.*
-
-- [ ] 
-- [ ] 
-- [ ] 

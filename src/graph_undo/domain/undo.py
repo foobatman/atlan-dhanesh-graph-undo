@@ -61,6 +61,11 @@ class UndoPlan:
     edges: list[EdgeOutcome]                  # by edge id
 
 
+def _order_hint(deleter: str) -> str:
+    """Skips caused by a later delete are final once this undo runs (an op is undone only once)."""
+    return f" (undo {deleter} first to restore this)"
+
+
 def _top_down(inp: UndoInputs) -> list[Node]:
     """N in walk order: BFS from the root over E's contains edges, children by qualified_name."""
     n = inp.removed_nodes
@@ -110,7 +115,7 @@ def plan_undo(inp: UndoInputs) -> UndoPlan:
             if p.deleted_by is None:                                          # 2b
                 return NodeOutcome(node, "restored", parent_id=p_id)
             holder = inp.holders.get(p.qualified_name)
-            gone = f"parent {p.qualified_name} was deleted by {p.deleted_by}"
+            gone = f"parent {p.qualified_name} was deleted by {p.deleted_by}" + _order_hint(p.deleted_by)
         if holder is not None and holder.type == p.type:                      # 2c
             return NodeOutcome(node, "restored", parent_id=holder.id)
         if holder is not None:                                                # 2d
@@ -132,7 +137,7 @@ def plan_undo(inp: UndoInputs) -> UndoPlan:
             return None
         other = inp.others[node_id]
         if other.deleted_by is not None:
-            return "endpoint_deleted", f"endpoint {other.qualified_name} was deleted by {other.deleted_by}"
+            return "endpoint_deleted", f"endpoint {other.qualified_name} was deleted by {other.deleted_by}" + _order_hint(other.deleted_by)
         return None
 
     def qn(node_id: str) -> str:
